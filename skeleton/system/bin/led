@@ -1,0 +1,12 @@
+#!/bin/sh
+
+case "$1" in
+on)
+	echo 0 > /sys/class/anbernic_misc/lowpwr_led
+	echo 1 > /sys/class/anbernic_misc/work_led
+	;;
+off)
+	echo 0 > /sys/class/anbernic_misc/lowpwr_led
+	echo 0 > /sys/class/anbernic_misc/work_led
+	;;
+esac

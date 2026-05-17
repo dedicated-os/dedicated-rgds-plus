@@ -1,0 +1,11 @@
+#!/bin/sh
+
+mount /dev/block/by-name/ROMS /mnt/mmc
+
+/usr/bin/tinymix set 11 2 # speaker
+/usr/bin/tinymix set 12 1 # mic
+
+echo 0 > /sys/class/anbernic_misc/lowpwr_led
+echo 1 > /sys/class/anbernic_misc/work_led
+
+/mnt/mmc/main.sh &

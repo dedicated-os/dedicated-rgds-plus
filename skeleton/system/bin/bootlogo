@@ -1,0 +1,40 @@
+#!/bin/sh
+
+SDCARD_PATH=/mnt/mmc
+BOOT_LOGO_1=$SDCARD_PATH/bootlogo-top.bmp
+BOOT_LOGO_2=$SDCARD_PATH/bootlogo-bottom.bmp
+BOOT_LAST_1=$SDCARD_PATH/userdata/bootlogo-top.txt
+BOOT_LAST_2=$SDCARD_PATH/userdata/bootlogo-bottom.txt
+
+UPDATE_1=false
+UPDATE_2=false
+
+if [ -f $BOOT_LOGO_1 ]; then
+	NEW_SUM_1=$(md5sum $BOOT_LOGO_1 | awk '{print $1}')
+	OLD_SUM_1=$(cat $BOOT_LAST_1 2>/dev/null || true)
+	if [ "$NEW_SUM_1" != "$OLD_SUM_1" ]; then
+		UPDATE_1=true
+	fi
+fi
+
+if [ -f $BOOT_LOGO_2 ]; then
+	NEW_SUM_2=$(md5sum $BOOT_LOGO_2 | awk '{print $1}')
+	OLD_SUM_2=$(cat $BOOT_LAST_2 2>/dev/null || true)
+	if [ "$NEW_SUM_2" != "$OLD_SUM_2" ]; then
+		UPDATE_2=true
+	fi
+fi
+
+[ $UPDATE_1 = false ] && [ $UPDATE_2 = false ] && exit
+
+cp -r $SDCARD_PATH/system/bootlogo /tmp
+[ $UPDATE_1 = true ] && cp $BOOT_LOGO_1 /tmp/bootlogo/logo.bmp
+[ $UPDATE_2 = true ] && cp $BOOT_LOGO_2 /tmp/bootlogo/logo_kernel.bmp
+/tmp/bootlogo/update.sh
+rm -rf /tmp/bootlogo
+
+[ $UPDATE_1 = true ] && echo $NEW_SUM_1 > $BOOT_LAST_1
+[ $UPDATE_2 = true ] && echo $NEW_SUM_2 > $BOOT_LAST_2
+sync
+
+reboot

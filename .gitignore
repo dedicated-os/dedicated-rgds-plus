@@ -1,0 +1,6 @@
+.DS_Store
+*.so
+*.elf
+build
+releases
+tmp
