@@ -1,0 +1,2 @@
+design for 2 640x480 screens
+implement design in libdrastic
