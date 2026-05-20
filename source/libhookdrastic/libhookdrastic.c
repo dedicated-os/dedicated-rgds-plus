@@ -14,7 +14,6 @@
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
-#include <alsa/asoundlib.h>
 
 // --------------------------------------------
 
@@ -78,6 +77,7 @@ static struct {
 	SDL_Window* windows[SCREEN_COUNT];
 	SDL_Renderer* renderers[SCREEN_COUNT];
 	SDL_Texture* screens[SCREEN_COUNT];
+	SDL_Texture* drastic_menu;
 	SDL_Texture* preview[SCREEN_COUNT];
 	SDL_Texture* icons;
 	SDL_Rect rects[SCREEN_COUNT];
@@ -959,6 +959,7 @@ SDL_Window* SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		app.windows[i] = real_SDL_CreateWindow(NULL, i*SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, flags);
 	}
+	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
 	return app.windows[0];
 }
 void SDL_SetWindowSize(SDL_Window* window, int w, int h) {
@@ -969,6 +970,9 @@ SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, int index, Uint32 flags) {
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		app.renderers[i] = real_SDL_CreateRenderer(app.windows[i], index, flags);
 	}
+	SDL_RendererInfo info;
+	SDL_GetRendererInfo(app.renderers[0], &info);
+	SDL_Log("video renderer: %s", info.name);
 	return app.renderers[0];
 }
 int SDL_RenderSetLogicalSize(SDL_Renderer *renderer, int w, int h) {
@@ -977,7 +981,10 @@ int SDL_RenderSetLogicalSize(SDL_Renderer *renderer, int w, int h) {
 int SDL_RenderClear(SDL_Renderer* renderer) {
 	return 1; // complete render takeover
 }
+
+int render_drastic_menu = 0;
 int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture  *texture, const SDL_Rect *srcrect, const SDL_Rect *dstrect) {
+	if (texture==app.drastic_menu) render_drastic_menu = 1;
 	return 1; // complete render takeover
 }
 void SDL_RenderPresent(SDL_Renderer *_) {
@@ -1004,6 +1011,14 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 		return;
 	}
 	
+	if (render_drastic_menu) {
+		render_drastic_menu = 0;
+		SDL_Renderer *renderer = app.renderers[0];
+	    real_SDL_RenderCopy(renderer, app.drastic_menu, NULL, NULL);
+	    real_SDL_RenderPresent(renderer);
+		return;
+	}
+	
 	// TODO: tmp
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		SDL_Renderer *renderer = app.renderers[i];
@@ -1025,13 +1040,21 @@ SDL_Texture *SDL_CreateTexture(SDL_Renderer *renderer, Uint32 format, int type, 
 			}
 	}
 	else {
-		texture = real_SDL_CreateTexture(renderer, format, type, w, h);
+		SDL_Log("real_SDL_CreateTexture(%i,%i)", w,h);
+		if (w==800 && h==480) {
+			texture = real_SDL_CreateTexture(app.renderers[0], format, type, w, h);
+			app.drastic_menu = texture;
+		}
+		else {
+			texture = real_SDL_CreateTexture(renderer, format, type, w, h);
+		}
 	}
 	return texture;
 }
 void SDL_DestroyTexture(SDL_Texture *texture) {
 	if (texture==app.screens[0]) app.screens[0] = NULL;
 	else if (texture==app.screens[1]) app.screens[1] = NULL;
+	else if (texture==app.drastic_menu) app.drastic_menu = NULL;
 	
 	real_SDL_DestroyTexture(texture);
 }
