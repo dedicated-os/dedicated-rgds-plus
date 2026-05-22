@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_opengles2.h>
+#include "xgl.h"
 
 // --------------------------------------------
 
@@ -74,13 +76,28 @@ typedef struct {
 static struct {
 	uintptr_t base;
 	
-	SDL_Window* windows[SCREEN_COUNT];
-	SDL_Renderer* renderers[SCREEN_COUNT];
-	SDL_Texture* screens[SCREEN_COUNT];
-	SDL_Texture* drastic_menu;
-	SDL_Texture* preview[SCREEN_COUNT];
-	SDL_Texture* icons;
-	SDL_Rect rects[SCREEN_COUNT];
+	struct {
+		SDL_Texture* preview[SCREEN_COUNT];
+		SDL_Texture* icons;
+	} sdl;
+	
+	struct {
+		SDL_Window *windows[SCREEN_COUNT];
+		SDL_GLContext contexts[SCREEN_COUNT];
+		XGL_Renderer *renderers[SCREEN_COUNT];
+		XGL_Texture *screens[SCREEN_COUNT];
+		XGL_Texture *preview[SCREEN_COUNT];
+		XGL_Texture *drastic_menu;
+		XGL_Texture *icons;
+		XGL_Shader *shader;
+	} xgl;
+	
+	struct {
+		SDL_Renderer* renderers[SCREEN_COUNT];
+		SDL_Texture* screens[SCREEN_COUNT];
+		SDL_Texture* drastic_menu;
+		int claimed[SCREEN_COUNT];
+	} dummy;
 	
 	int count;
 	int current;
@@ -220,6 +237,9 @@ static SDL_Renderer* (*real_SDL_CreateRenderer)(SDL_Window*, int, Uint32) = NULL
 static int (*real_SDL_RenderClear)(SDL_Renderer *) = NULL;
 static void (*real_SDL_RenderPresent)(SDL_Renderer*) = NULL;
 static SDL_Texture* (*real_SDL_CreateTexture)(SDL_Renderer*, Uint32, int, int, int) = NULL;
+static int (*real_SDL_LockTexture)(SDL_Texture * texture, const SDL_Rect * rect, void **pixels, int *pitch) = NULL;
+static void (*real_SDL_UnlockTexture)(SDL_Texture * texture) = NULL;
+static int (*real_SDL_UpdateTexture)(SDL_Texture * texture, const SDL_Rect * rect, const void *pixels, int pitch) = NULL;
 static void (*real_SDL_DestroyTexture)(SDL_Texture *) = NULL;
 static int (*real_SDL_RenderCopy)(SDL_Renderer*, SDL_Texture*, const SDL_Rect*, const SDL_Rect*) = NULL;
 static int (*real_SDL_OpenAudio)(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) = NULL;
@@ -874,7 +894,12 @@ static void App_set(int i) {
 	SDL_Log("app.game_name: %s", app.game_name);
 }
 
-static void App_init(void) {
+static void App_preload(void) {
+	SDL_Log("App_preload");
+	
+	// before even drastic loads
+	// this is drastic setup logic
+	
 	Settings_load();
 	
 	putString(CPU_PATH "scaling_governor", "userspace");
@@ -890,8 +915,6 @@ static void App_init(void) {
 	app.capacity = 16;
 	app.items = malloc(sizeof(Entry) * app.capacity);
 
-	Fonts_init();
-	
 	// get games
 	for (int i=0; i<NUMBER_OF(dirs); i++) {
 		DIR* dir = opendir(dirs[i]);
@@ -926,7 +949,46 @@ static void App_init(void) {
 	}
 	
 	App_set(app.current);
+}
+static void App_init(void) {
+	SDL_Log("App_init");
 	
+	// after SDL_Init
+	// this is rendering setup logic
+	
+	XGL_Init();
+	Fonts_init();
+	
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		SDL_Window *window = real_SDL_CreateWindow(NULL, i*SCREEN_WIDTH,0, SCREEN_WIDTH,SCREEN_HEIGHT, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
+		SDL_GLContext *context = SDL_GL_CreateContext(window);
+		if (i == 0) {
+			SDL_GL_MakeCurrent(window, context);
+			SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+		}
+		XGL_Renderer *renderer = XGL_CreateRenderer(window, context);
+		XGL_Texture *screen = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, XGL_TEXTUREACCESS_STREAMING, DS_WIDTH, DS_HEIGHT);
+
+		app.xgl.windows[i] = window;
+		app.xgl.contexts[i] = context;
+		app.xgl.renderers[i] = renderer;
+		app.xgl.screens[i] = screen;
+		
+		SDL_Renderer *sdl_renderer = real_SDL_CreateRenderer(window, -1, 0);
+		SDL_Texture *sdl_screen = real_SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DS_WIDTH, DS_HEIGHT);
+		
+		app.dummy.renderers[i] = sdl_renderer;
+		app.dummy.screens[i] = sdl_screen;
+	}
+	
+	XGL_Renderer *renderer = app.xgl.renderers[0];	
+	app.xgl.shader = XGL_CreateSharpShader(renderer); // XGL_CreateSharpShader_Original(renderer);
+	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
+	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
+		
+
+	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
+
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
 	app.usb = open(USB_PATH "online", O_RDONLY);
 }
@@ -935,16 +997,51 @@ static void App_quit(void) {
 	
 	free(app.items);
 	
-	if (app.icons) SDL_DestroyTexture(app.icons);
-	if (app.preview[0]) SDL_DestroyTexture(app.preview[0]);
-	if (app.preview[1]) SDL_DestroyTexture(app.preview[1]);
+	if (app.sdl.icons) SDL_DestroyTexture(app.sdl.icons);
+	if (app.sdl.preview[0]) SDL_DestroyTexture(app.sdl.preview[0]);
+	if (app.sdl.preview[1]) SDL_DestroyTexture(app.sdl.preview[1]);
 	
 	close(app.bat);
 	close(app.usb);
 	
 	Fonts_quit();
 	
+	SDL_DestroyTexture(app.dummy.drastic_menu);
+	XGL_DestroyTexture(app.xgl.drastic_menu);
+	XGL_DestroyShader(app.xgl.shader);
+	
+	// drastic never destroys renderers or windows so this is safe
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		SDL_DestroyTexture(app.dummy.screens[i]);
+		SDL_DestroyRenderer(app.dummy.renderers[i]);
+		XGL_DestroyTexture(app.xgl.screens[i]);
+		XGL_DestroyRenderer(app.xgl.renderers[i]);
+		SDL_GL_DeleteContext(app.xgl.contexts[i]);
+		SDL_DestroyWindow(app.xgl.windows[i]);
+	}
+	
+	XGL_Quit();
+	
 	Settings_save();
+}
+
+static int render_drastic_menu = 0;
+static void App_render(void) {
+	if (render_drastic_menu) {
+		render_drastic_menu = 0;
+		XGL_Renderer *renderer = app.xgl.renderers[0];
+		XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
+		XGL_RenderCopy(renderer, app.xgl.drastic_menu, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT}, NULL);
+		XGL_RenderPresent(renderer);
+		return;
+	}
+	
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		XGL_Renderer *renderer = app.xgl.renderers[i];
+		XGL_SetRenderShader(renderer, app.xgl.shader);
+	    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
+	    XGL_RenderPresent(renderer);
+	}
 }
 
 // --------------------------------------------
@@ -953,27 +1050,19 @@ static void App_quit(void) {
 
 int SDL_Init(Uint32 flags) {
 	Settings_setBrightness(settings.brightness);
-	return real_SDL_Init(flags);
+	int result = real_SDL_Init(flags);
+	App_init();
+	return result;
 }
 SDL_Window* SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint32 flags) {
-	for (int i=0; i<SCREEN_COUNT; i++) {
-		app.windows[i] = real_SDL_CreateWindow(NULL, i*SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, flags);
-	}
-	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
-	return app.windows[0];
+	return app.xgl.windows[0]; // created in App_init
 }
 void SDL_SetWindowSize(SDL_Window* window, int w, int h) {
 	// window size is always 640x480
 }
 
 SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, int index, Uint32 flags) {
-	for (int i=0; i<SCREEN_COUNT; i++) {
-		app.renderers[i] = real_SDL_CreateRenderer(app.windows[i], index, flags);
-	}
-	SDL_RendererInfo info;
-	SDL_GetRendererInfo(app.renderers[0], &info);
-	SDL_Log("video renderer: %s", info.name);
-	return app.renderers[0];
+	return app.dummy.renderers[0]; // created in App_init
 }
 int SDL_RenderSetLogicalSize(SDL_Renderer *renderer, int w, int h) {
 	return 1; // complete render takeover
@@ -982,9 +1071,8 @@ int SDL_RenderClear(SDL_Renderer* renderer) {
 	return 1; // complete render takeover
 }
 
-int render_drastic_menu = 0;
 int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture  *texture, const SDL_Rect *srcrect, const SDL_Rect *dstrect) {
-	if (texture==app.drastic_menu) render_drastic_menu = 1;
+	if (texture==app.dummy.drastic_menu) render_drastic_menu = 1;
 	return 1; // complete render takeover
 }
 void SDL_RenderPresent(SDL_Renderer *_) {
@@ -1010,53 +1098,62 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 		
 		return;
 	}
-	
-	if (render_drastic_menu) {
-		render_drastic_menu = 0;
-		SDL_Renderer *renderer = app.renderers[0];
-	    real_SDL_RenderCopy(renderer, app.drastic_menu, NULL, NULL);
-	    real_SDL_RenderPresent(renderer);
-		return;
-	}
-	
-	// TODO: tmp
-	for (int i=0; i<SCREEN_COUNT; i++) {
-		SDL_Renderer *renderer = app.renderers[i];
-	    real_SDL_RenderCopy(renderer, app.screens[i], NULL, NULL);
-	    real_SDL_RenderPresent(renderer);
-	}
+	App_render();
 }
 
 SDL_Texture *SDL_CreateTexture(SDL_Renderer *renderer, Uint32 format, int type, int w, int h) {
-	SDL_Texture *texture;
+	// SDL_Log("SDL_CreateTexture(%s, %i,%i)", SDL_GetPixelFormatName(format), w,h);
+	SDL_Texture *texture = NULL;
 	if (type==SDL_TEXTUREACCESS_STREAMING && w==DS_WIDTH && h==DS_HEIGHT) {
-			if (!app.screens[0]) {
-				texture = real_SDL_CreateTexture(app.renderers[0], format, type, w, h);
-				app.screens[0] = texture;
-			}
-			else if (!app.screens[1]) {
-				texture = real_SDL_CreateTexture(app.renderers[1], format, type, w, h);
-				app.screens[1] = texture;
-			}
+		if (!app.dummy.claimed[0]) {
+			app.dummy.claimed[0] = 1;
+			texture = app.dummy.screens[0];
+		}
+		else if (!app.dummy.claimed[1]) {
+			app.dummy.claimed[1] = 1;
+			texture = app.dummy.screens[1];
+		}
 	}
 	else {
-		SDL_Log("real_SDL_CreateTexture(%i,%i)", w,h);
 		if (w==800 && h==480) {
-			texture = real_SDL_CreateTexture(app.renderers[0], format, type, w, h);
-			app.drastic_menu = texture;
+			texture = app.dummy.drastic_menu;
 		}
-		else {
-			texture = real_SDL_CreateTexture(renderer, format, type, w, h);
-		}
+	}
+	if (!texture) {
+		texture = real_SDL_CreateTexture(renderer, format, type, w, h);
 	}
 	return texture;
 }
+int SDL_LockTexture(SDL_Texture * texture, const SDL_Rect * rect, void **pixels, int *pitch) {
+	if (texture==app.dummy.screens[0]) {
+		return XGL_LockTexture(app.xgl.screens[0], rect, pixels, pitch);
+	}
+	else if (texture==app.dummy.screens[1]) {
+		return XGL_LockTexture(app.xgl.screens[1], rect, pixels, pitch);
+	}
+	return real_SDL_LockTexture(texture, rect, pixels, pitch); // doesn't matter
+}
+void SDL_UnlockTexture(SDL_Texture * texture) {
+	if (texture==app.dummy.screens[0]) {
+		return XGL_UnlockTexture(app.xgl.screens[0]);
+	}
+	else if (texture==app.dummy.screens[1]) {
+		return XGL_UnlockTexture(app.xgl.screens[1]);
+	}
+	return real_SDL_UnlockTexture(texture); // doesn't matter
+}
+int SDL_UpdateTexture(SDL_Texture * texture, const SDL_Rect * rect, const void *pixels, int pitch) {
+	if (texture==app.dummy.drastic_menu) {
+		return XGL_UpdateTexture(app.xgl.drastic_menu, rect, pixels, pitch);
+	}
+	return real_SDL_UpdateTexture(texture, rect, pixels, pitch); // doesn't matter
+}
 void SDL_DestroyTexture(SDL_Texture *texture) {
-	if (texture==app.screens[0]) app.screens[0] = NULL;
-	else if (texture==app.screens[1]) app.screens[1] = NULL;
-	else if (texture==app.drastic_menu) app.drastic_menu = NULL;
-	
-	real_SDL_DestroyTexture(texture);
+	// if (texture==app.dummy.screens[0]) app.dummy.screens[0] = NULL;
+	// else if (texture==app.dummy.screens[1]) app.dummy.screens[1] = NULL;
+	// else if (texture==app.dummy.drastic_menu) app.dummy.drastic_menu = NULL;
+	// real_SDL_DestroyTexture(texture);
+	// no-op now
 }
 
 int SDL_PollEvent(SDL_Event* event) {
@@ -1291,6 +1388,9 @@ static void resolve_real(void) {
 	real_SDL_RenderPresent = dlsym(RTLD_NEXT, "SDL_RenderPresent");
 	
 	real_SDL_CreateTexture = dlsym(RTLD_NEXT, "SDL_CreateTexture");
+	real_SDL_LockTexture = dlsym(RTLD_NEXT, "SDL_LockTexture");
+	real_SDL_UnlockTexture = dlsym(RTLD_NEXT, "SDL_UnlockTexture");
+	real_SDL_UpdateTexture = dlsym(RTLD_NEXT, "SDL_UpdateTexture");
 	real_SDL_DestroyTexture = dlsym(RTLD_NEXT, "SDL_DestroyTexture");
 	
 	real_SDL_PollEvent = dlsym(RTLD_NEXT, "SDL_PollEvent");
@@ -1311,7 +1411,7 @@ static inline void hook(void) {
 static drastic_main_t drastic_main = NULL;
 static int override_args(int argc, char **argv, char **envp) {
 	hook();
-	App_init();
+	App_preload();
 	char *new_argv[] = { argv[0], app.game_path, NULL };
 	
 	puts("[LOAD] resume requested");
