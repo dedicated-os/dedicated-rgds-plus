@@ -1,0 +1,4 @@
+#!/bin/sh
+
+echo $1 > /sys/class/backlight/backlight1/brightness
+echo $1 > /sys/class/backlight/backlight/brightness
