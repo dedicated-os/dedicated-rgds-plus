@@ -1,0 +1,13 @@
+#!/bin/sh
+
+DSI_1=$(modetest -M rockchip -c | awk '/^[0-9]+[ \t]+[0-9]+[ \t]+connected[ \t]+DSI-1/ { print $1 }')
+DSI_2=$(modetest -M rockchip -c | awk '/^[0-9]+[ \t]+[0-9]+[ \t]+connected[ \t]+DSI-2/ { print $1 }')
+
+case "$1" in
+on)
+	modetest -M rockchip -w $DSI_1:DPMS:0 -w $DSI_2:DPMS:0
+	;;
+off)
+	modetest -M rockchip -w $DSI_1:DPMS:3 -w $DSI_2:DPMS:3
+	;;
+esac
