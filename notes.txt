@@ -1,50 +1,6 @@
 design for 2 640x480 screens
 implement design in libdrastic
 
-https://raw.githubusercontent.com/LoveRetro/NextUI/2a9c0d4de688271af8e823cc35a31625ef167d99/skeleton/BASE/Shaders/glsl/sharp-shimmerless.glsl
-
-considering switching to OpenGL
-	tmp/
-		sdl2dos (latest)
-		sdl2gl
-
-lid close 	scancode=73
-lid open 	scancode=76
-home		scancode=270
-power		scancode=102
-
-up 		hat=0 value=1
-down 	hat=0 value=4
-left	hat=0 value=8
-right 	hat=0 value=2
-
-start 	button=7
-select	button=6
-
-x		button=3
-b		button=1
-y		button=2
-a		button=0
-
-l1		button=4
-r1		button=5
-l2		button=10
-r2		button=11
-l3		button=9
-r3		button=12
-
-menu	button=13
-
-vup 	button=16
-vdn 	button=15
-
-lx	axis=1 value=-32768 32767
-ly	axis=0 value=-32768 32767
-
-rx	axis=3 value=-32768 32767
-ry	axis=3 value=-32768 32767
-
-like touch
-
-tx	code 53 (ABS_MT_POSITION_X)
-ty	code 54 (ABS_MT_POSITION_Y)
+add
+	settings.scale 	= 0|1 (native|fill)
+	settings.shader	= 0|1|2 (nn|ss|ln)

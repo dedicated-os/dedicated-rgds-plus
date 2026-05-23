@@ -137,6 +137,20 @@ typedef enum {
 	MODE_ARCHIVE,
 } MenuMode;
 
+typedef enum {
+	SCALE_NATIVE,
+	SCALE_ASPECT,
+
+	SCALE_COUNT
+} ScaleMode;
+typedef enum {
+	SHADER_NEAREST,
+	SHADER_SHARP,
+	SHADER_LINEAR,
+
+	SHADER_COUNT
+} ScaleShader;
+
 typedef struct {
 	char name[MAX_FILE];
 	int hidden;
@@ -154,8 +168,10 @@ static struct {
 		XGL_Texture *overlay;
 		XGL_Texture *drastic_menu;
 		XGL_Texture *icons;
-		XGL_Shader *shader;
+		XGL_Shader *shaders[SHADER_COUNT];
 	} xgl;
+	
+	SDL_Rect rects[SCREEN_COUNT];
 	
 	struct {
 		SDL_Renderer* renderers[SCREEN_COUNT];
@@ -218,11 +234,16 @@ static struct {
 	int version;
 	int volume;		// 0-20
 	int brightness;	// 0 - 10
+	int scale;
+	int shader;
+	int unused[3];
 	char game[MAX_PATH];
 } settings = {
-	.version = 0,
+	.version = 1,
 	.volume = 6,
 	.brightness = 3,
+	.scale = SCALE_ASPECT,
+	.shader = SHADER_SHARP,
 };
 
 #define SETTINGS_PATH USERDATA_PATH "/settings.bin"
@@ -1139,22 +1160,22 @@ static int Device_handleEvent(SDL_Event* event) {
 			menu_combo = 0;
 		}
 		
-		// if (event->jbutton.button==JOY_L2) {
-		// 	if (menu_down) {
-		// 		settings.cropped = !settings.cropped;
-		// 		App_sync(1);
-		// 		menu_combo = 1;
-		// 		return 1;
-		// 	}
-		// }
-		// else if (event->jbutton.button==JOY_R2) {
-		// 	if (menu_down) {
-		// 		settings.spread = !settings.spread;
-		// 		App_sync(1);
-		// 		menu_combo = 1;
-		// 		return 1;
-		// 	}
-		// }
+		if (event->jbutton.button==JOY_L2) {
+			if (menu_down) {
+				settings.scale = (settings.scale + 1) % SCALE_COUNT;
+				App_sync(1);
+				menu_combo = 1;
+				return 1;
+			}
+		}
+		else if (event->jbutton.button==JOY_R2) {
+			if (menu_down) {
+				settings.shader = (settings.shader + 1) % SHADER_COUNT;
+				App_sync(1);
+				menu_combo = 1;
+				return 1;
+			}
+		}
 		
 		if (event->jbutton.button==JOY_PLUS) {
 			if (menu_down) {
@@ -1211,7 +1232,12 @@ static int Device_handleEvent(SDL_Event* event) {
 // app logic
 // --------------------------------------------
 
-static void App_sync(int force) {}
+static void App_sync(int force) {
+	if (force) app.synced = 0;
+	if (app.synced) return;	
+	
+	
+}
 static void App_load(void) {
 	drastic_load_state(AUTO_SLOT);
 }
@@ -1621,7 +1647,9 @@ static void App_init(void) {
 	}
 	
 	XGL_Renderer *renderer = app.xgl.renderers[0];	
-	app.xgl.shader = XGL_CreateSharpShader(renderer); // XGL_CreateSharpShader_Original(renderer);
+	app.xgl.shaders[SHADER_NEAREST] = XGL_GetDefaultTextureShader(renderer);
+	app.xgl.shaders[SHADER_SHARP] = XGL_CreateSharpShader(renderer);
+	app.xgl.shaders[SHADER_LINEAR] = XGL_CreateLinearShader(renderer);
 	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
 	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
 		
@@ -1648,7 +1676,9 @@ static void App_quit(void) {
 	
 	SDL_DestroyTexture(app.dummy.drastic_menu);
 	XGL_DestroyTexture(app.xgl.drastic_menu);
-	XGL_DestroyShader(app.xgl.shader);
+	for (int i=0; i<SHADER_COUNT; i++) {
+		XGL_DestroyShader(app.xgl.shaders[i]);
+	}
 	
 	// drastic never destroys renderers or windows so this is safe
 	for (int i=0; i<SCREEN_COUNT; i++) {
@@ -1841,12 +1871,20 @@ static void App_menu(void) {
 		
 		// render
 		if (dirty) {
+			SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
+			rect.x = (SCREEN_WIDTH - rect.w) / 2;
+			rect.y = (SCREEN_HEIGHT - rect.h);
+			
+			int scale = settings.scale==SCALE_ASPECT;
+			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
+			XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+			
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_Renderer *renderer = app.xgl.renderers[i];
-				XGL_SetRenderShader(renderer, app.xgl.shader);
-			    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
+				XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
+	    		XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, scale ? NULL : &rect);
 	    
-				XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
+				XGL_SetRenderShader(renderer, default_shader);
 				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 				
 				// top screen
@@ -1883,6 +1921,7 @@ static void App_menu(void) {
 		
 				XGL_RenderPresent(renderer);
 				if (app.capture) App_capture("menu", i);
+				rect.y = 0;
 			}
 			app.capture = 0;
 		}
@@ -1898,7 +1937,6 @@ static void App_menu(void) {
 	SDL_Log("exit menu");
 }
 
-static int tmp_toggle = 0;
 static int render_drastic_menu = 0;
 static void App_render(void) {
 	if (render_drastic_menu) {
@@ -1910,15 +1948,18 @@ static void App_render(void) {
 		return;
 	}
 	
-	int s = 2;
-	SDL_Rect rect = {0,0,DS_WIDTH*s,DS_HEIGHT*s};
+	SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
 	rect.x = (SCREEN_WIDTH - rect.w) / 2;
 	rect.y = (SCREEN_HEIGHT - rect.h);
 	
+	int scale = settings.scale==SCALE_ASPECT;
+	XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
+	XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
-		XGL_SetRenderShader(renderer, tmp_toggle ? XGL_GetDefaultTextureShader(renderer) : app.xgl.shader);
-	    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, tmp_toggle ? &rect : NULL);
+		XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
+	    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, scale ? NULL : &rect);
 		XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
 		
 		if (i==0) {
@@ -2075,14 +2116,35 @@ int SDL_PollEvent(SDL_Event* event) {
 				if (event->key.keysym.scancode==SCAN_POWER) {
 					unlink("/tmp/exec_loop");
 					drastic_quit();
-					// tmp_toggle = !tmp_toggle;
 				}
 			} break;
 			case SDL_FINGERDOWN:
 			case SDL_FINGERUP:
 			case SDL_FINGERMOTION: {
-				event->tfinger.x = raw_x / 2; // ???
-				event->tfinger.y = raw_y;
+				// TODO: maybe this has something to do with the dummy 2d renderer?
+				int x = raw_x / 2; // drastic is expecting SCREEN_WIDTH/2?
+				int y = raw_y; // but just SCREEN_HEIGHT?
+				if (settings.scale == SCALE_NATIVE) {
+					int sw = SCREEN_WIDTH / 2; // drastic is thinking in half-widths?
+					int sh = SCREEN_HEIGHT;
+
+				    int w = DS_WIDTH; // drastic is thinking in half-widths?
+				    int h = DS_HEIGHT * 2;
+					
+				    int ox = (sw - w) / 2; // centered
+				    int oy = 0;
+					
+				    x = ((x - ox) * sw)  / w;
+				    y = ((y - oy) * sh) / h;
+
+				    if (x < 0) x = 0;
+				    else if (x >= sw) x = sw - 1;
+
+				    if (y < 0) y = 0;
+				    else if (y >= sh) y = sh - 1;
+				}
+				event->tfinger.x = x;
+				event->tfinger.y = y;
 			} break;
 		}
 		
