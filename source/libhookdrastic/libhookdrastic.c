@@ -18,6 +18,21 @@
 #include "xgl.h"
 
 // --------------------------------------------
+// XGL extensions
+// --------------------------------------------
+
+XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
+	SDL_Surface *tmp = IMG_Load(path);
+	if (!tmp) {
+	    SDL_SetError("IMG_Load %s failed: %s", path, IMG_GetError());
+	    return NULL;
+	}
+	XGL_Texture *texture = XGL_CreateTextureFromSurface(renderer, tmp);
+	SDL_FreeSurface(tmp);
+	return texture;
+}
+
+// --------------------------------------------
 
 #define CEIL_TO(x, n) (((x) + (n) - 1) / (n) * (n))
 #define NUMBER_OF(items) (sizeof(items) / sizeof((items)[0]))
@@ -86,7 +101,7 @@
 
 #define JOY_START	7
 #define JOY_SELECT	6
-#define JOY_MENU	13
+#define JOY_MENU	8 // and 13!?
 
 #define JOY_L1		4
 #define JOY_R1		5
@@ -135,7 +150,8 @@ static struct {
 		SDL_GLContext contexts[SCREEN_COUNT];
 		XGL_Renderer *renderers[SCREEN_COUNT];
 		XGL_Texture *screens[SCREEN_COUNT];
-		XGL_Texture *preview[SCREEN_COUNT];
+		XGL_Texture *previews[SCREEN_COUNT];
+		XGL_Texture *overlay;
 		XGL_Texture *drastic_menu;
 		XGL_Texture *icons;
 		XGL_Shader *shader;
@@ -168,28 +184,24 @@ static struct {
 
 static int osd_at;
 
-static int raw_x,raw_y;
+static int raw_x,raw_y; // touch screen fix
 
 
 // --------------------------------------------
 // raw HMI controls
 // --------------------------------------------
 
-#define BL1_PATH "/sys/class/backlight/backlight1/brightness"
-#define BL2_PATH "/sys/class/backlight/backlight/brightness"
+// TODO: tmp, these aren't raw and the spawned 
+// shell process causes slowdown and audio issues
 
 static void raw_vol(int value) {
 	char cmd[256];
-	sprintf(cmd, "tinymix set 14 %i %i", value, value);
+	sprintf(cmd, "vol %i", value);
 	system(cmd);
 }
 static void raw_bri(int value) {
 	char cmd[256];
-
-	sprintf(cmd, "echo %i > %s", value, BL1_PATH);
-	system(cmd);
-
-	sprintf(cmd, "echo %i > %s", value, BL2_PATH);
+	sprintf(cmd, "bri %i", value);
 	system(cmd);
 }
 static void raw_led(int enable) {
@@ -234,26 +246,26 @@ static void Settings_setVolume(int value) {
 	char cmd[MAX_FILE];
 	static const uint8_t raw[21] = {
 		  0, // mute
-		120, // 0
-		131, // 11
-		138, // 7
-		143, // 5
-		147, // 4
-		151, // 4
-		154, // 3
-		157, // 3
-		160, // 3
-		162, // 2
-		164, // 2
-		166, // 2
-		168, // 2
-		170, // 2
-		172, // 2
-		174, // 2
-		176, // 2
-		178, // 2
-		179, // 2
-		180, // 1
+		128, // 0
+  		135, // 7
+  		141, // 6
+  		148, // 7
+  		154, // 6
+  		161, // 7
+  		167, // 6
+  		174, // 7
+  		180, // 6
+  		187, // 7
+  		193, // 6
+  		200, // 7
+  		206, // 6
+  		213, // 7
+  		219, // 6
+  		226, // 7
+  		232, // 6
+  		239, // 7
+  		245, // 6
+  		252, // 7
 	};
 	
 	raw_vol(raw[value]);
@@ -263,16 +275,16 @@ static void Settings_setBrightness(int value) {
 	char cmd[MAX_FILE];
 	static const uint8_t raw[11] = {
 		  1, // 0
-		  8, // 8
-		 16, // 8
-		 32, // 16
-		 48, // 16
-		 72, // 24
-		 96, // 24
-		128, // 32
-		160, // 32
-		192, // 32
-		255, // 64
+		  3, // 
+		  5, // 
+		  8, // 
+		 16, // 
+		 40, // 
+		 64, // 
+		 80, // 
+		128, // 
+		192, // 
+		255, // 
 	};
 	
 	raw_bri(raw[value]);
@@ -900,8 +912,19 @@ void Fonts_quit(void) {
 // button repeater
 // --------------------------------------------
 
+#define REPEAT_TIMEOUT	300
+#define REPEAT_INTERVAL 100
 #define DEADZONE 12000
 
+static int Repeater_fakeButtonEvent(SDL_Event* event, int btn, int press) {
+	SDL_memset(event, 0, sizeof(*event));
+	event->type = event->jbutton.type = press ? SDL_JOYBUTTONDOWN : SDL_JOYBUTTONUP;
+	event->jbutton.which  = 0;
+	event->jbutton.button = btn;
+	event->jbutton.state  = press ? SDL_PRESSED : SDL_RELEASED;
+	event->jbutton.timestamp = SDL_GetTicks();
+	return 1;
+}
 static int Repeater_fakeHatEvent(SDL_Event* event, int value) {
 	SDL_memset(event, 0, sizeof(*event));
 
@@ -914,16 +937,46 @@ static int Repeater_fakeHatEvent(SDL_Event* event, int value) {
 
 	return 1;
 }
-
 static int Repeater_pollEvent(SDL_Event* event) {
 	static int ax = 0;
 	static int ay = 0;
 	static int last_pad = HAT_NEUTRAL;
 	
-	int result = real_SDL_PollEvent(event);
+	static int menu_down = 0;
+	static int plus_next = 0;
+	static int minus_next = 0;
+	
+	int result = 0;
+	
+	int now = SDL_GetTicks();
+	if (plus_next && now>=plus_next) {
+		result = Repeater_fakeButtonEvent(event, JOY_PLUS, 1);
+		plus_next += REPEAT_INTERVAL;
+	}
+	else if (minus_next && now>=minus_next) {
+		result = Repeater_fakeButtonEvent(event, JOY_MINUS, 1);
+		minus_next += REPEAT_INTERVAL;
+	}
+
+	else {
+		result = real_SDL_PollEvent(event);
+	}
+	
 	if (!result) return result;
 	
-	if (event->type==SDL_JOYAXISMOTION) {
+	if (event->type==SDL_JOYBUTTONDOWN) {
+		int now = SDL_GetTicks();
+
+		if (event->jbutton.button==JOY_MENU)					menu_down = 1;
+		if (!plus_next && event->jbutton.button==JOY_PLUS)		plus_next = now + REPEAT_TIMEOUT;
+		if (!minus_next && event->jbutton.button==JOY_MINUS)	minus_next = now + REPEAT_TIMEOUT;
+	}
+	else if (event->type==SDL_JOYBUTTONUP) {
+		if (event->jbutton.button==JOY_MENU) 	menu_down = 0;
+		if (event->jbutton.button==JOY_PLUS) 	plus_next = 0;
+		if (event->jbutton.button==JOY_MINUS)	minus_next = 0;
+	}
+	else if (event->type==SDL_JOYAXISMOTION) {
 		int lx = ax;
 		int ly = ay;
 		int pad = last_pad;
@@ -968,10 +1021,17 @@ static int Repeater_pollEvent(SDL_Event* event) {
 }
 
 // --------------------------------------------
+// app declarations
+// --------------------------------------------
+static void App_quit(void);
+static void App_load(void);
+static void App_save(void);
+static void App_reset(void);
+static void App_sync(int force);
+
+// --------------------------------------------
 // device features
 // --------------------------------------------
-static void App_save(void);
-
 static void Device_mute(int mute) {
 	if (mute) raw_vol(0);
 	else Settings_setVolume(settings.volume);
@@ -1060,14 +1120,98 @@ static int Device_handleEvent(SDL_Event* event) {
 		}
 	}
 	
+	static int menu_down = 0;
+	static int menu_combo = 0;
+
+	if (event->type==SDL_KEYDOWN) {
+		if (event->key.keysym.scancode==SCAN_BACK) { // capture
+			if (menu_down) {
+				app.capture = 1;
+				menu_combo = 1;
+				return 1;
+			}
+		}
+	}
+	else if (event->type==SDL_JOYBUTTONDOWN) {
+		if (event->jbutton.button==JOY_MENU) {
+			SDL_Log("menu down");
+			menu_down = 1;
+			menu_combo = 0;
+		}
+		
+		// if (event->jbutton.button==JOY_L2) {
+		// 	if (menu_down) {
+		// 		settings.cropped = !settings.cropped;
+		// 		App_sync(1);
+		// 		menu_combo = 1;
+		// 		return 1;
+		// 	}
+		// }
+		// else if (event->jbutton.button==JOY_R2) {
+		// 	if (menu_down) {
+		// 		settings.spread = !settings.spread;
+		// 		App_sync(1);
+		// 		menu_combo = 1;
+		// 		return 1;
+		// 	}
+		// }
+		
+		if (event->jbutton.button==JOY_PLUS) {
+			if (menu_down) {
+				if (settings.brightness<10) {
+					SDL_Log("increase brightness");
+					Settings_setBrightness(settings.brightness+1);
+					menu_combo = 1;
+				}
+				app.osd = OSD_BRIGHTNESS;
+			}
+			else {
+				if (settings.volume<20) {
+					SDL_Log("increase volume");
+					Settings_setVolume(settings.volume+1);
+				}
+				app.osd = OSD_VOLUME;
+			}
+			osd_at = SDL_GetTicks();
+			return 1;
+		}
+		else if (event->jbutton.button==JOY_MINUS) {
+			if (menu_down) {
+				if (settings.brightness>0) {
+					SDL_Log("decrease brightness");
+					Settings_setBrightness(settings.brightness-1);
+					menu_combo = 1;
+				}
+				app.osd = OSD_BRIGHTNESS;
+			}
+			else {
+				if (settings.volume>0) {
+					SDL_Log("decrease volume");
+					Settings_setVolume(settings.volume-1);
+				}
+				app.osd = OSD_VOLUME;
+				
+			}
+			osd_at = SDL_GetTicks();
+			return 1;
+		}
+	}
+	else if (event->type==SDL_JOYBUTTONUP) {
+		if (event->jbutton.button==JOY_MENU) {
+			SDL_Log("released menu, combo: %i", menu_combo);
+			menu_down = 0;
+			return menu_combo;
+		}
+	}
+	
 	return 0;
 }
 
 // --------------------------------------------
-// custom menu
+// app logic
 // --------------------------------------------
-static void App_quit(void);
 
+static void App_sync(int force) {}
 static void App_load(void) {
 	drastic_load_state(AUTO_SLOT);
 }
@@ -1081,6 +1225,278 @@ static void App_reset(void) {
 	puts("[LOAD] reset requested");
 	loader.state = LOADER_REQUESTED;
 	loader.after = LOADER_RESET;
+}
+
+enum {
+	SNAP_SAVE = 0,
+	SNAP_CURRENT,
+	SNAP_RESET,
+};
+
+static void App_screenshot(int game, int screen, int snap) {
+	if (!app.xgl.screens[screen]) return;
+	XGL_Texture* texture = app.xgl.screens[screen];
+	
+	char game_name[MAX_FILE];
+	if (snap==SNAP_CURRENT) strcpy(game_name, "current");
+	else strcpy(game_name, app.items[game].name);
+	char *dot = strrchr(game_name, '.');
+	if (dot && dot!=game_name) *dot = '\0';
+	
+	char path[MAX_PATH];
+	sprintf(path, USERDATA_PATH "/screenshots/%s-%i.bmp", game_name, screen);
+	// SDL_Log("screenshot: %s", path);
+	
+	void *pixels = NULL;
+	int pitch = 0;
+
+	int w,h,access;
+	Uint32 fmt;
+	XGL_QueryTexture(texture, &fmt, &access, &w, &h);
+	XGL_LockTexture(texture, NULL, &pixels, &pitch);
+
+	const int depth = SDL_BITSPERPIXEL(fmt);
+	SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormatFrom(pixels, w, h, depth, pitch, fmt);
+	if (surface) {
+		SDL_SaveBMP(surface, path);
+		SDL_FreeSurface(surface);
+	}
+
+	XGL_UnlockTexture(texture);
+}
+static void App_preview(int game, int screen, int snap) {
+	if (!app.xgl.previews[screen]) return;
+	XGL_Texture* texture = app.xgl.previews[screen];
+	
+	char game_name[MAX_FILE];
+	if (snap==SNAP_CURRENT) strcpy(game_name, "current");
+	else strcpy(game_name, app.items[game].name);
+	char *dot = strrchr(game_name, '.');
+	if (dot && dot!=game_name) *dot = '\0';
+	
+	char path[MAX_PATH];
+	sprintf(path, USERDATA_PATH "/screenshots/%s-%i.bmp", game_name, screen);
+	if (snap==SNAP_RESET || !exists(path)) sprintf(path, ASSETS_PATH "/screenshot-%i.png", screen);
+
+	SDL_Log("preview: %s (snap: %i)", path, snap);
+	SDL_Surface* tmp = IMG_Load(path);
+
+	int w, h;
+	Uint32 format;
+	XGL_QueryTexture(texture, &format, NULL, &w, &h);
+
+	if (format==tmp->format->format) {
+		XGL_UpdateTexture(texture, NULL, tmp->pixels, tmp->pitch);
+	} else {
+		void *dst;
+		int dst_pitch;
+		if (XGL_LockTexture(texture, NULL, &dst, &dst_pitch)==0) {
+			SDL_ConvertPixels(w, h, tmp->format->format, tmp->pixels, tmp->pitch, format, dst, dst_pitch);
+			XGL_UnlockTexture(texture);
+		}
+	}
+	
+	SDL_FreeSurface(tmp);
+}
+static int App_capture(int i) {
+	char path[MAX_PATH];
+	sprintf(path, "/tmp/capture-%i.bmp", i);
+	SDL_Surface *tmp = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
+	XGL_RenderReadPixels(app.xgl.renderers[i], NULL, SDL_PIXELFORMAT_ARGB8888, tmp->pixels, tmp->pitch);
+	SDL_SaveBMP(tmp, path);
+	SDL_FreeSurface(tmp);
+}
+
+
+static void App_getDisplayName(const char* in_name, char* out_name) {
+	char* tmp;
+	char work_name[MAX_FILE];
+	strcpy(work_name, in_name);
+	strcpy(out_name, in_name);
+	
+	// extract just the filename if necessary
+	tmp = strrchr(work_name, '/');
+	if (tmp) strcpy(out_name, tmp+1);
+	
+	// remove extension(s), eg. .p8.png
+	while ((tmp = strrchr(out_name, '.'))!=NULL) {
+		int len = strlen(tmp);
+		if (len>2 && len<=5) {
+			if (tmp[1]==' ') tmp[1] = '\0'; // excempt . followed by whitespace
+			else tmp[0] = '\0'; // 1-4 letter extension plus dot (was 1-3, extended for .doom files)
+		}
+		else break;
+	}
+	
+	// remove trailing parens (round and square)
+	strcpy(work_name, out_name);
+	while ((tmp=strrchr(out_name, '('))!=NULL || (tmp=strrchr(out_name, '['))!=NULL) {
+		if (tmp==out_name) break;
+		tmp[0] = '\0';
+		tmp = out_name;
+	}
+	
+	// make sure we haven't nuked the entire name
+	if (out_name[0]=='\0') strcpy(out_name, work_name);
+	
+	// remove trailing whitespace
+	tmp = out_name + strlen(out_name) - 1;
+	while(tmp>out_name && isspace((unsigned char)*tmp)) tmp--;
+	tmp[1] = '\0';
+}
+static int App_wrap(Font* font, char* text, int max_lines, char** lines, int* splits) {
+	int line_count = 0;
+
+	char line[1024] = {0};
+	char word[256] = {0};
+	char* p = text;
+	int line_width = 0;
+	
+	while (*p) {
+		char* start = p;
+	
+		// get next word
+		while (*p && !isspace(*p)) p++;
+		int word_len = p - start;
+		strncpy(word, start, word_len);
+		word[word_len] = '\0';
+		
+		// wrap on hyphen
+		if (strcmp(word, "-")==0) {
+			if (strlen(line)>0 && line_count<max_lines) {
+				lines[line_count++] = strdup(line);
+				splits[line_count] = 1;
+				line[0] = '\0';
+			}
+			while (isspace(*p)) p++;
+			continue;
+		}
+	
+		// append to line
+		char test_line[1024] = {0};
+		if (strlen(line)>0) sprintf(test_line,"%s %s", line, word);
+		else sprintf(test_line,"%s", word);
+	
+		Font_getTextSize(font, test_line, &line_width, NULL);
+		line_width += font->offset_x * 2;
+		
+		int ow = 6 + 6;
+		if (line_width<=SCREEN_WIDTH-ow) {
+			strcpy(line, test_line);
+		}
+		else {
+			if (line_count<max_lines) {
+				lines[line_count++] = strdup(line);
+			}
+			else {
+				line[0] = '\0';
+				break;
+			}
+			strcpy(line, word);
+		}
+	
+		// advance to next word
+		while (isspace(*p)) p++;
+	}
+
+	// add trailing line
+	if (strlen(line)>0 && line_count<max_lines) {
+		lines[line_count++] = strdup(line);
+	}
+	return line_count;
+}
+static void App_trunc(Font* font, const char* text, int max_width, char* out_text) {
+	int fw = 0;
+	Font_getTextSize(font, text, &fw, NULL);
+	
+	if (fw<=max_width) {
+		strcpy(out_text, text);
+		return;
+	}
+	
+	const char* sep = "...";
+	int slen = strlen(sep);
+	int sw = 0;
+	Font_getTextSize(font, sep, &sw, NULL);
+	// width(head) + width(sep) + width(tail) != width(head + sep + tail)
+	// because it doesn't account for tracking/kerning against sep and head/tail
+	// so we have to fudge it here or out_text could be wider than max_width
+	sw += font->tracking * 2;
+	
+	fw = max_width - sw;
+	int hw = fw / 2;
+	int len = strlen(text);
+	
+	char tmp[MAX_FILE];
+	int head = 0;
+	int tail = 0;
+
+	#define WORDS_ONLY 1 // looks much better to me
+	
+	// head
+	for (int i=0; i<len; i++) {
+		if (WORDS_ONLY && i!=0 && text[i]!=' ') continue;
+		
+		memcpy(tmp, text, i);
+		tmp[i] = '\0';
+		int w = 0;
+		Font_getTextSize(font, tmp, &w, NULL);
+		if (w>hw) {
+			if (head) break; // found at least one word
+			if (w>fw) {
+				int j = i;
+				while (j>0) {
+					j -= 1;
+					memcpy(tmp,text,j);
+					tmp[j] = '\0';
+					Font_getTextSize(font, tmp, &w, NULL);
+					if (w<=fw) {
+						head = j;
+						break;
+					}
+				}
+				break;
+			}
+			// else continue searching for a word break past the halfway
+		}
+		head = i;
+	}
+	
+	// trim trailing space or dash
+	while (WORDS_ONLY && head>0 && (text[head-1]==' ' || text[head-1]=='-')) head -= 1;
+	
+	memcpy(tmp, text, head);
+	tmp[head] = '\0';
+	int w = 0;
+	Font_getTextSize(font, tmp, &w, NULL);
+
+	hw = max_width - sw - w;
+	if (hw<0) hw = 0;
+	
+	// tail
+	for (int i=1; i<len-head; i++) {
+		int start = len - i;
+		if (WORDS_ONLY && start>0 && text[start-1]!=' ') continue;
+		
+		const char* trail = text + start;
+		int w = 0;
+		Font_getTextSize(font, trail, &w, NULL);
+		if (w>hw) break;
+		tail = i;
+	}
+	
+	while (WORDS_ONLY && tail>0 && (text[len-tail]==' ' || text[len-tail]=='-')) tail -= 1;
+	
+	int i = 0;
+	memcpy(out_text+i, text, head);
+	i += head;
+	memcpy(out_text+i, sep, slen);
+	i += slen;
+	if (tail) {
+		memcpy(out_text+i, text+(len-tail), tail);
+		i += tail;
+	}
+	out_text[i] = '\0';
 }
 
 static int App_sort(const void* a, const void* b) {
@@ -1184,7 +1600,7 @@ static void App_init(void) {
 	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		SDL_Window *window = real_SDL_CreateWindow(NULL, i*SCREEN_WIDTH,0, SCREEN_WIDTH,SCREEN_HEIGHT, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
-		SDL_GLContext *context = SDL_GL_CreateContext(window);
+		SDL_GLContext context = SDL_GL_CreateContext(window);
 		if (i == 0) {
 			SDL_GL_MakeCurrent(window, context);
 			SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
@@ -1221,8 +1637,9 @@ static void App_quit(void) {
 	free(app.items);
 	
 	if (app.xgl.icons) 		XGL_DestroyTexture(app.xgl.icons);
-	if (app.xgl.preview[0]) XGL_DestroyTexture(app.xgl.preview[0]);
-	if (app.xgl.preview[1]) XGL_DestroyTexture(app.xgl.preview[1]);
+	if (app.xgl.overlay) 	XGL_DestroyTexture(app.xgl.overlay);
+	if (app.xgl.previews[0]) XGL_DestroyTexture(app.xgl.previews[0]);
+	if (app.xgl.previews[1]) XGL_DestroyTexture(app.xgl.previews[1]);
 	
 	close(app.bat);
 	close(app.usb);
@@ -1248,6 +1665,238 @@ static void App_quit(void) {
 	Settings_save();
 }
 
+// TODO: no longer antialiased, switch to images
+static void AA_rect(XGL_Renderer *renderer, int x, int y, int w, int h, int s, SDL_Color c) {
+	if (s==0) {
+		// body
+		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+		const SDL_Rect rects[] = {
+			{x + 0, y+1,   1, h-2}, // left
+			{x + 1, y+0, w-2, h  }, // middle
+			{x+w-1, y+1,   1, h-2}, // right
+		};
+		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+	}
+	else {
+		// outline
+		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+		const SDL_Rect rects[] = {
+			{x + 0, y + 1,   1, h-2}, // left
+			{x + 1, y + 0, s-1, h  }, // left
+			{x + s, y + 0, w-8, s  }, // top
+			{x + s, y+h-s, w-8, s  }, // bottom
+			{x+w-s, y + 0, s-1, h  }, // right
+			{x+w-1, y + 1,   1, h-2}, // right
+		};
+		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+	}
+}
+static void AA_bolt(XGL_Renderer *renderer, int x, int y, SDL_Color c) {
+	const SDL_Rect rects[] = {
+		// top left
+		{x+ 6,y+ 0, 6,2},
+		{x+ 5,y+ 2, 6,2},
+		{x+ 4,y+ 4, 6,2},
+		{x+ 3,y+ 6, 6,2},
+		// middle
+		{x+ 9,y+ 7,11,1},
+		{x+ 2,y+ 8,17,2},
+		{x+ 1,y+10,17,2},
+		{x+ 0,y+12,11,1},
+		// bottom right
+		{x+11,y+12, 6,2},
+		{x+10,y+14, 6,2},
+		{x+ 9,y+16, 6,2},
+		{x+ 8,y+18, 6,2},
+	};
+	XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+	XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+}
+static void AA_bat(XGL_Renderer *renderer, int x, int y, int battery, SDL_Color c) {
+	AA_rect(renderer, x,y,48,28, 4, c);
+	AA_rect(renderer, x+47,y+8,5,12, 0, c);
+	
+	int w = CEIL_TO(battery,20) * 30 / 100;
+	if (w>0) AA_rect(renderer, x+8,y+8,w+2,12, 0, c);
+}
+static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, int shadowed) {
+	int x = 571;
+	int y = 17;
+	
+	SDL_Color c = LIGHT_COLOR;
+
+	if (shadowed) AA_bat(renderer, x+2,y+2, battery, BLACK_COLOR);
+	AA_bat(renderer, x,y, battery, c);
+
+	if (is_charging && battery<100) {
+		y += 4;
+		
+		char percent[8];
+		sprintf(percent, "%i%%", battery);
+		int w = 0;
+		Font_getTextSize(font24, percent, &w, NULL);
+		
+		x -= w + 4;
+		Font_shadowText(renderer, font24, percent, x,y, c);
+
+		x -= 24;
+		AA_bolt(renderer, x+2,y+2,BLACK_COLOR);
+		AA_bolt(renderer, x,y,c);
+	}
+}
+static void App_OSD(XGL_Renderer *renderer, char* label, int value, int max) {
+	int nh = 28;
+	int x,y,w,h;
+	Font_getTextSize(font16, label, &w, &h);
+	w = 252;
+	h = 64;
+	x = (SCREEN_WIDTH - w) / 2;
+	y = (SCREEN_HEIGHT - h) - 32;
+	
+	AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x60));
+
+	Font_shadowText(renderer, font16, label, x+8, y+8, LIGHT_COLOR);
+	
+	int nw = max==10?20:8;
+	int no = max==10?24:12;
+	for (int i=0; i<max; i++) {
+		int nx = x + 8;
+		int ny = y + 28;
+		AA_rect(renderer, nx+i*no+2,ny+2,nw,nh, 0, BLACK_COLOR);
+		if (i<value) {
+			AA_rect(renderer, nx+i*no,ny,nw,nh, 0, WHITE_COLOR);
+		}
+	}
+}
+
+static void App_menu(void) {
+	SDL_Log("enter menu");
+	app.menu = 1;
+	Device_mute(1);
+	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
+	
+	SDL_Surface* tmp;
+	if (!app.xgl.overlay) {
+		SDL_Log("create overlay");
+		int w = 1; // we can just stretch horizontally on the GPU
+		int h = SCREEN_HEIGHT * 2;
+		tmp = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+
+		uint32_t* d = tmp->pixels;
+		int total = w * h;
+		for (int i=0; i<total; i++,d++) {
+			*d = (64 + ((total - i) * 160 / total)) << 24; // 87.5% to 25%
+		}
+
+		app.xgl.overlay = XGL_CreateTextureFromSurface(app.xgl.renderers[0], tmp);
+		SDL_FreeSurface(tmp);
+	}
+	if (!app.xgl.icons) {
+		app.xgl.icons = XGL_LoadTexture(app.xgl.renderers[0], ASSETS_PATH "/icons.png");
+	}
+	
+	static int last_battery = 0;
+	static int was_charging = 0;
+	
+	int current = app.current;
+	
+	int dirty = 1;
+	int in_menu = 1;
+	int last_osd = app.osd;
+	while (in_menu) {
+		
+		if (osd_at+1000<SDL_GetTicks()) app.osd = OSD_NONE;
+		if (last_osd!=app.osd) {
+			last_osd = app.osd;
+			dirty = 1;
+		}
+		
+		SDL_Event event;
+		while (in_menu && Repeater_pollEvent(&event)) {
+			int btn = event.jbutton.button;
+			
+			if (Device_handleEvent(&event)) {
+				dirty = 1;
+				continue;
+			}
+			
+			if (event.type==SDL_JOYBUTTONUP) {
+				if (btn==JOY_MENU) {
+					in_menu = 0;
+				}
+			}
+		}
+		
+		int is_charging = getInt(app.usb);
+		if (is_charging!=was_charging) {
+			was_charging = is_charging;
+			dirty = 1;
+		}
+		
+		int battery = getInt(app.bat);
+		if (battery!=last_battery) {
+			last_battery = battery;
+			dirty = 1;
+		}
+		
+		// render
+		if (dirty) {
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_Renderer *renderer = app.xgl.renderers[i];
+				XGL_SetRenderShader(renderer, app.xgl.shader);
+			    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
+	    
+				XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
+				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+				
+				// top screen
+				if (i==0) {
+					// system
+					Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
+					
+					// game name
+					char name[MAX_FILE];
+					App_getDisplayName(app.items[current].name, name);
+	
+					#define MAX_LINES 8
+					char* lines[MAX_LINES];
+					int splits[MAX_LINES] = {0};
+					int line_count = App_wrap(font36, name, MAX_LINES, lines, splits);
+					SDL_Color color = WHITE_COLOR;
+					for (int i=0; i<line_count; i++) {
+						if (splits[i]) color = LIGHT_COLOR;
+						Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
+						free(lines[i]);
+					}
+					
+					// battery
+					App_battery(renderer, battery,is_charging,1);
+					
+					// osd
+					if (app.osd==OSD_VOLUME) App_OSD(renderer, "VOLUME", settings.volume, 20);
+					else if (app.osd==OSD_BRIGHTNESS) App_OSD(renderer, "BRIGHTNESS", settings.brightness, 10);
+				}
+				// bottom screen
+				else {
+					
+				}
+		
+				XGL_RenderPresent(renderer);
+				if (app.capture) App_capture(i);
+			}
+			app.capture = 0;
+		}
+		else {
+			real_SDL_Delay(16);
+		}
+	}
+	
+	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
+	if (!app.fast_forward && loader.state==LOADER_IDLE) Device_mute(0);
+	app.menu = 0;
+	SDL_Log("exit menu");
+}
+
 static int tmp_toggle = 0;
 static int render_drastic_menu = 0;
 static void App_render(void) {
@@ -1269,13 +1918,20 @@ static void App_render(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 		XGL_SetRenderShader(renderer, tmp_toggle ? XGL_GetDefaultTextureShader(renderer) : app.xgl.shader);
 	    XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, tmp_toggle ? &rect : NULL);
-	    
-		// TODO: tmp
-		// Font_shadowText(renderer, font36, "HELLO WORLD", 16,16, WHITE_COLOR);
+		XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
+		
+		if (i==0) {
+			if (app.osd==OSD_VOLUME) App_OSD(renderer, "VOLUME", settings.volume, 20);
+			else if (app.osd==OSD_BRIGHTNESS) App_OSD(renderer, "BRIGHTNESS", settings.brightness, 10);
+		}
 		
 		XGL_RenderPresent(renderer);
+		if (app.capture) App_capture(i);
 		rect.y = 0;
 	}
+	app.capture = 0;
+	
+	if (osd_at+1000<SDL_GetTicks()) app.osd = OSD_NONE;
 }
 
 // --------------------------------------------
@@ -1331,6 +1987,7 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 		
 		return;
 	}
+	
 	App_render(); // complete render takeover
 
 	Device_tick();
@@ -1397,6 +2054,18 @@ int SDL_PollEvent(SDL_Event* event) {
 		if (!result) return result;
 		
 		if (Device_handleEvent(event)) continue;
+		
+		if (event->type==SDL_JOYBUTTONDOWN) {
+			if (event->jbutton.button==JOY_MENU) {
+				continue; // disable drastic menu for now
+			}
+		}
+		else if (event->type==SDL_JOYBUTTONUP) {
+			if (event->jbutton.button==JOY_MENU) {
+				App_menu();
+				continue;
+			}
+		}
 	
 		// LOG_event(event);
 		switch (event->type) {

@@ -21,6 +21,7 @@ int XGL_GetRendererOutputSize(XGL_Renderer *renderer, int *w, int *h);
 
 XGL_Texture *XGL_CreateTexture(XGL_Renderer *renderer, Uint32 format, int access, int w, int h);
 XGL_Texture *XGL_CreateTextureFromSurface(XGL_Renderer *renderer, SDL_Surface *surface);
+int XGL_QueryTexture(XGL_Texture *texture, Uint32 *format, int *access, int *w, int *h);
 void XGL_DestroyTexture(XGL_Texture *texture);
 int XGL_SetTextureBlendMode(XGL_Texture *texture, SDL_BlendMode blend_mode);
 int XGL_SetTextureColorMod(XGL_Texture *texture, Uint8 r, Uint8 g, Uint8 b);
@@ -42,6 +43,7 @@ int XGL_RenderClear(XGL_Renderer *renderer);
 int XGL_RenderFillRect(XGL_Renderer *renderer, const SDL_Rect *rect);
 int XGL_RenderFillRects(XGL_Renderer *renderer, const SDL_Rect *rects, int count);
 int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *src, const SDL_Rect *dst);
+int XGL_RenderReadPixels(XGL_Renderer *renderer, const SDL_Rect *rect, Uint32 format, void *pixels, int pitch);
 void XGL_RenderPresent(XGL_Renderer *renderer);
 
 #endif

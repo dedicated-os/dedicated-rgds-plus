@@ -42,6 +42,7 @@ struct XGL_Texture {
 	GLuint id;
 	int w;
 	int h;
+	Uint32 format;
 	GLenum gl_format;
 	GLenum gl_type;
 	int bytes_per_pixel;
@@ -426,6 +427,7 @@ XGL_Texture *XGL_CreateTexture(XGL_Renderer *renderer, Uint32 format, int access
 	texture->owner = renderer;
 	texture->w = w;
 	texture->h = h;
+	texture->format = format;
 	texture->gl_format = pixel_format.gl_format;
 	texture->gl_type = pixel_format.gl_type;
 	texture->bytes_per_pixel = pixel_format.bytes_per_pixel;
@@ -449,6 +451,26 @@ XGL_Texture *XGL_CreateTexture(XGL_Renderer *renderer, Uint32 format, int access
 	glTexImage2D(GL_TEXTURE_2D, 0, texture->gl_format, texture->w, texture->h, 0, texture->gl_format, texture->gl_type, NULL);
 
 	return texture;
+}
+
+int XGL_QueryTexture(XGL_Texture *texture, Uint32 *format, int *access, int *w, int *h) {
+	if (!texture) {
+		SDL_SetError("XGL_QueryTexture: texture is NULL");
+		return -1;
+	}
+	if (format) {
+		*format = texture->format;
+	}
+	if (access) {
+		*access = texture->access;
+	}
+	if (w) {
+		*w = texture->w;
+	}
+	if (h) {
+		*h = texture->h;
+	}
+	return 0;
 }
 
 void XGL_DestroyTexture(XGL_Texture *texture) {
@@ -965,6 +987,71 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 	glDisableVertexAttribArray(shader->attr_texcoord);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+	return 0;
+}
+
+int XGL_RenderReadPixels(XGL_Renderer *renderer, const SDL_Rect *rect, Uint32 format, void *pixels, int pitch) {
+	SDL_Rect read_rect;
+	SDL_PixelFormat *dst_format;
+	Uint8 *read_pixels;
+	int read_pitch;
+	int min_pitch;
+	int gl_y;
+	int y;
+
+	if (!pixels) {
+		SDL_SetError("XGL_RenderReadPixels: pixels is NULL");
+		return -1;
+	}
+	if (XGL_SetCurrentRenderer(renderer) != 0 || XGL_UpdateRendererOutputSize(renderer) != 0) {
+		return -1;
+	}
+
+	if (rect) {
+		read_rect = *rect;
+	} else {
+		read_rect.x = 0;
+		read_rect.y = 0;
+		read_rect.w = renderer->output_w;
+		read_rect.h = renderer->output_h;
+	}
+	if (read_rect.x < 0 || read_rect.y < 0 || read_rect.w <= 0 || read_rect.h <= 0 || read_rect.x + read_rect.w > renderer->output_w || read_rect.y + read_rect.h > renderer->output_h) {
+		SDL_SetError("XGL_RenderReadPixels: invalid read rectangle");
+		return -1;
+	}
+
+	dst_format = SDL_AllocFormat(format);
+	if (!dst_format) {
+		return -1;
+	}
+	min_pitch = read_rect.w * dst_format->BytesPerPixel;
+	SDL_FreeFormat(dst_format);
+	if (pitch < min_pitch) {
+		SDL_SetError("XGL_RenderReadPixels: pitch is too small");
+		return -1;
+	}
+
+	read_pitch = read_rect.w * 4;
+	read_pixels = (Uint8 *)SDL_malloc((size_t)read_pitch * (size_t)read_rect.h);
+	if (!read_pixels) {
+		SDL_OutOfMemory();
+		return -1;
+	}
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	gl_y = renderer->output_h - read_rect.y - read_rect.h;
+	glReadPixels(read_rect.x, gl_y, read_rect.w, read_rect.h, GL_RGBA, GL_UNSIGNED_BYTE, read_pixels);
+
+	for (y = 0; y < read_rect.h; y++) {
+		Uint8 *src_row = read_pixels + (size_t)(read_rect.h - 1 - y) * (size_t)read_pitch;
+		Uint8 *dst_row = (Uint8 *)pixels + (size_t)y * (size_t)pitch;
+		if (SDL_ConvertPixels(read_rect.w, 1, SDL_PIXELFORMAT_RGBA32, src_row, read_pitch, format, dst_row, pitch) != 0) {
+			SDL_free(read_pixels);
+			return -1;
+		}
+	}
+
+	SDL_free(read_pixels);
 	return 0;
 }
 
