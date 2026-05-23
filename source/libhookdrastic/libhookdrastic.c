@@ -1298,9 +1298,9 @@ static void App_preview(int game, int screen, int snap) {
 	
 	SDL_FreeSurface(tmp);
 }
-static int App_capture(int i) {
+static int App_capture(const char *name, int i) {
 	char path[MAX_PATH];
-	sprintf(path, "/tmp/capture-%i.bmp", i);
+	sprintf(path, "/tmp/capture-%s-%i.bmp", name, i);
 	SDL_Surface *tmp = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
 	XGL_RenderReadPixels(app.xgl.renderers[i], NULL, SDL_PIXELFORMAT_ARGB8888, tmp->pixels, tmp->pitch);
 	SDL_SaveBMP(tmp, path);
@@ -1882,13 +1882,14 @@ static void App_menu(void) {
 				}
 		
 				XGL_RenderPresent(renderer);
-				if (app.capture) App_capture(i);
+				if (app.capture) App_capture("menu", i);
 			}
 			app.capture = 0;
 		}
 		else {
 			real_SDL_Delay(16);
 		}
+		Device_tick(); // required for power off
 	}
 	
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
@@ -1926,7 +1927,7 @@ static void App_render(void) {
 		}
 		
 		XGL_RenderPresent(renderer);
-		if (app.capture) App_capture(i);
+		if (app.capture) App_capture("game", i);
 		rect.y = 0;
 	}
 	app.capture = 0;
