@@ -299,6 +299,14 @@ XGL_Shader *XGL_CreateShader(XGL_Renderer *renderer, const char *vertex_source, 
 	return shader;
 }
 
+XGL_Shader *XGL_CreateLinearShader(XGL_Renderer *renderer) {
+	XGL_Shader *shader = XGL_CreateShader(renderer, XGL_default_vertex_shader, XGL_default_fragment_shader);
+	if (shader) {
+		shader->linear_filter = SDL_TRUE;
+	}
+	return shader;
+}
+
 XGL_Shader *XGL_CreateSharpShader(XGL_Renderer *renderer) {
 	XGL_Shader *shader = XGL_CreateShader(renderer, XGL_sharp_vertex_shader, XGL_sharp_fragment_shader);
 	if (shader) {
