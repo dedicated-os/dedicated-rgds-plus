@@ -1,6 +1,2 @@
-design for 2 640x480 screens
-implement design in libdrastic
-
-add
-	settings.scale 	= 0|1 (native|fill)
-	settings.shader	= 0|1|2 (nn|ss|ln)
+enable fast forward
+bind BACK to drastic menu? (tmp)

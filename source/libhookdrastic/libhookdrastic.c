@@ -49,6 +49,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define BAT_PATH 		"/sys/class/power_supply/battery/"
 #define USB_PATH 		"/sys/class/power_supply/usb/"
 #define CPU_PATH		"/sys/devices/system/cpu/cpu0/cpufreq/"
+#define LID_PATH		"/sys/class/anbernic_misc/hallkey"
 
 #define FREQ_MENU		"408000"
 #define FREQ_GAME		"1800000"
@@ -190,6 +191,7 @@ static struct {
 	
 	int bat;
 	int usb;
+	int lid;
 	
 	int synced;
 	int menu;
@@ -1076,7 +1078,8 @@ static void Device_sleep(void) {
 	while (asleep) {
 		while (asleep && real_SDL_PollEvent(&event)) {
 			if (event.type==SDL_KEYUP) {
-				if (event.key.keysym.scancode==SCAN_OPEN) {
+				int scan = event.key.keysym.scancode;
+				if (scan==SCAN_OPEN || (scan==SCAN_POWER && getInt(app.lid)!=2)) {
 					asleep = 0;
 					break;
 				}
@@ -1113,6 +1116,7 @@ static void Device_poweroff(void) {
 	drastic_quit();
 }
 #define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes
+#define WAKE_DEFER 250 // quarter of a second
 #define POWER_TIMEOUT 1000 // one second
 static int power_at = 0;
 static void Device_tick(void) {
@@ -1137,6 +1141,7 @@ static int Device_handleEvent(SDL_Event* event) {
 	else if (event->type==SDL_KEYUP) {
 		if (event->key.keysym.scancode==SCAN_POWER) {
 			power_at = 0;
+			Device_sleep();
 			return 1;
 		}
 	}
@@ -1144,20 +1149,19 @@ static int Device_handleEvent(SDL_Event* event) {
 	static int menu_down = 0;
 	static int menu_combo = 0;
 
-	if (event->type==SDL_KEYDOWN) {
-		if (event->key.keysym.scancode==SCAN_BACK) { // capture
+	if (event->type==SDL_JOYBUTTONDOWN) {
+		if (event->jbutton.button==JOY_MENU) {
+			SDL_Log("menu down");
+			menu_down = 1;
+			menu_combo = 0;
+		}
+		
+		if (event->jbutton.button==JOY_START) {
 			if (menu_down) {
 				app.capture = 1;
 				menu_combo = 1;
 				return 1;
 			}
-		}
-	}
-	else if (event->type==SDL_JOYBUTTONDOWN) {
-		if (event->jbutton.button==JOY_MENU) {
-			SDL_Log("menu down");
-			menu_down = 1;
-			menu_combo = 0;
 		}
 		
 		if (event->jbutton.button==JOY_L2) {
@@ -1232,27 +1236,6 @@ static int Device_handleEvent(SDL_Event* event) {
 // app logic
 // --------------------------------------------
 
-static void App_sync(int force) {
-	if (force) app.synced = 0;
-	if (app.synced) return;	
-	
-	
-}
-static void App_load(void) {
-	drastic_load_state(AUTO_SLOT);
-}
-static void App_save(void) {
-	// App_screenshot(app.current, 0, SNAP_SAVE);
-	// App_screenshot(app.current, 1, SNAP_SAVE);
-	drastic_save_state(AUTO_SLOT);
-}
-static void App_reset(void) {
-	drastic_audio_pause(0);
-	puts("[LOAD] reset requested");
-	loader.state = LOADER_REQUESTED;
-	loader.after = LOADER_RESET;
-}
-
 enum {
 	SNAP_SAVE = 0,
 	SNAP_CURRENT,
@@ -1302,6 +1285,7 @@ static void App_preview(int game, int screen, int snap) {
 	
 	char path[MAX_PATH];
 	sprintf(path, USERDATA_PATH "/screenshots/%s-%i.bmp", game_name, screen);
+	// SDL_Log("game_name: %s path: %s", game_name, path);
 	if (snap==SNAP_RESET || !exists(path)) sprintf(path, ASSETS_PATH "/screenshot-%i.png", screen);
 
 	SDL_Log("preview: %s (snap: %i)", path, snap);
@@ -1332,7 +1316,26 @@ static int App_capture(const char *name, int i) {
 	SDL_SaveBMP(tmp, path);
 	SDL_FreeSurface(tmp);
 }
-
+static void App_sync(int force) {
+	if (force) app.synced = 0;
+	if (app.synced) return;	
+	
+	// TODO: no-op here?
+}
+static void App_load(void) {
+	drastic_load_state(AUTO_SLOT);
+}
+static void App_save(void) {
+	App_screenshot(app.current, 0, SNAP_SAVE);
+	App_screenshot(app.current, 1, SNAP_SAVE);
+	drastic_save_state(AUTO_SLOT);
+}
+static void App_reset(void) {
+	drastic_audio_pause(0);
+	puts("[LOAD] reset requested");
+	loader.state = LOADER_REQUESTED;
+	loader.after = LOADER_RESET;
+}
 
 static void App_getDisplayName(const char* in_name, char* out_name) {
 	char* tmp;
@@ -1558,6 +1561,17 @@ static void App_set(int i) {
 	SDL_Log("app.game_path: %s", app.game_path);
 	SDL_Log("app.game_name: %s", app.game_name);
 }
+static int App_next(int start, int dir) {
+	int i = start;
+	int count = app.count;
+	for (int _=0; _<count; _++) {
+		i += dir;
+		if (i>=count) i -= count;
+		else if (i<0) i += count;
+		if (!app.items[i].hidden || i==app.current) return i;
+	}
+	return start;
+}
 
 static void App_preload(void) {
 	SDL_Log("App_preload");
@@ -1613,6 +1627,12 @@ static void App_preload(void) {
 		}
 	}
 	
+	// if there is no current and the first game is hidden
+	if (app.count>0 && app.items[app.current].hidden) {
+		// try to find a non-hidden game
+		app.current = App_next(app.current, 1);
+	}
+	
 	App_set(app.current);
 }
 static void App_init(void) {
@@ -1658,6 +1678,7 @@ static void App_init(void) {
 
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
 	app.usb = open(USB_PATH "online", O_RDONLY);
+	app.lid = open(LID_PATH, O_RDONLY);
 }
 static void App_quit(void) {
 	SDL_Log("App_quit");
@@ -1671,6 +1692,7 @@ static void App_quit(void) {
 	
 	close(app.bat);
 	close(app.usb);
+	close(app.lid);
 	
 	Fonts_quit();
 	
@@ -1805,6 +1827,13 @@ static void App_menu(void) {
 	Device_mute(1);
 	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
 	
+	static int last_battery = 0;
+	static int was_charging = 0;
+	
+	int current = app.current;
+	App_screenshot(current, 0, SNAP_CURRENT);
+	App_screenshot(current, 1, SNAP_CURRENT);
+	
 	SDL_Surface* tmp;
 	if (!app.xgl.overlay) {
 		SDL_Log("create overlay");
@@ -1821,17 +1850,35 @@ static void App_menu(void) {
 		app.xgl.overlay = XGL_CreateTextureFromSurface(app.xgl.renderers[0], tmp);
 		SDL_FreeSurface(tmp);
 	}
+	
+	if (!app.xgl.previews[0]) {
+		app.xgl.previews[0] = XGL_CreateTexture(app.xgl.renderers[0], SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DS_WIDTH,DS_HEIGHT);
+		app.xgl.previews[1] = XGL_CreateTexture(app.xgl.renderers[1], SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DS_WIDTH,DS_HEIGHT);
+	}
+	
 	if (!app.xgl.icons) {
 		app.xgl.icons = XGL_LoadTexture(app.xgl.renderers[0], ASSETS_PATH "/icons.png");
 	}
 	
-	static int last_battery = 0;
-	static int was_charging = 0;
+	char* save_items[] = {
+		"SAVE",
+		"LOAD",
+		"ARCHIVE",
+		"RESET",
+	};
+	char* load_items[] = {
+		"LOAD",
+		"ARCHIVE",
+	};
 	
-	int current = app.current;
-	
+	int menu_at = SDL_GetTicks();
+	int selected = 0;
 	int dirty = 1;
+	int top = 0;
+	int rows = 15;
 	int in_menu = 1;
+	SDL_Event event;
+	int mode = MODE_MENU;
 	int last_osd = app.osd;
 	while (in_menu) {
 		
@@ -1841,7 +1888,6 @@ static void App_menu(void) {
 			dirty = 1;
 		}
 		
-		SDL_Event event;
 		while (in_menu && Repeater_pollEvent(&event)) {
 			int btn = event.jbutton.button;
 			
@@ -1850,7 +1896,145 @@ static void App_menu(void) {
 				continue;
 			}
 			
-			if (event.type==SDL_JOYBUTTONUP) {
+			if (event.type==SDL_JOYHATMOTION) {
+				int hat = event.jhat.value;
+				if (hat & HAT_NEUTRAL) continue;
+				
+				dirty = 1;
+				
+				if (mode==MODE_MENU) {
+					if (hat & HAT_UP) {
+						selected -= 1;
+					}
+					else if (hat & HAT_DOWN) {
+						selected += 1;
+					}
+				
+					if (hat & HAT_RIGHT) {
+						selected = 0;
+						current = App_next(current, +1);
+					}
+					else if (hat & HAT_LEFT) {
+						selected = 0;
+						current = App_next(current, -1);
+					}
+				}
+				else if (mode==MODE_ARCHIVE) {
+					if (hat & HAT_UP) { // ROW UP
+						current -= 1;
+						if (current<0) current += app.count;
+					}
+					else if (hat & HAT_DOWN) { // ROW DOWN
+						current += 1;
+						if (current>=app.count) current -= app.count;
+					}
+					
+					if (hat & HAT_RIGHT) { // PAGE FORWARD
+						if (current==app.count-1) current = 0;
+						else {
+							current += rows;
+							if (current>=app.count) current = app.count-1;
+						}
+					}
+					else if (hat & HAT_LEFT) { // PAGE BACK
+						if (current==0) current = app.count-1;
+						else {
+							current -= rows;
+							if (current<0) current = 0;
+						}
+					}
+				}
+			}
+			else if (event.type==SDL_JOYBUTTONDOWN) {
+				menu_at = SDL_GetTicks();
+				
+				if (mode==MODE_MENU) {
+					if (btn==JOY_B) { // BACK
+						if (current!=app.current) {
+							current = app.current;
+							selected = 0;
+							dirty = 1;
+						}
+						else {
+							in_menu = 0;
+						}
+					}
+					else if (btn==JOY_A) { // SELECT
+						if (current==app.current) {
+							if (selected==0) { // SAVE
+								App_save();
+							}
+							else if (selected==1) { // LOAD
+								App_load();
+							}
+							else if (selected==2) { // ARCHIVE
+								mode = MODE_ARCHIVE;
+								selected = current;
+								dirty = 1;
+							}
+							else if (selected==3) { // RESET
+								App_reset();
+							}
+							if (mode==MODE_MENU) in_menu = 0;
+						}
+						else {
+							if (selected==0) { // LOAD
+								App_save();
+								App_set(current);
+								Settings_save();
+							
+								drastic_audio_pause(0);
+								puts("[LOAD] resume requested");
+								loader.state = LOADER_REQUESTED;
+								loader.after = LOADER_RESUME;
+							
+								in_menu = 0;
+							}
+							else if (selected==1) { // ARCHIVE
+								mode = MODE_ARCHIVE;
+								selected = current;
+								dirty = 1;
+							}
+						}
+					}
+				}
+				else if (mode==MODE_ARCHIVE) {
+					if (btn==JOY_A) { // TOGGLE
+						Entry* item = &app.items[current];
+						
+						char shown[MAX_FILE];
+						sprintf(shown, "%s/%s", GAMES_PATH, item->name);
+						char hidden[MAX_FILE];
+						sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
+						
+						char *dst,*src;
+						if (item->hidden) {
+							src = hidden;
+							dst = shown;
+						}
+						else {
+							src = shown;
+							dst = hidden;
+						}
+						
+						if (!exists(dst) && rename(src, dst)==0) {
+							item->hidden = !item->hidden;
+							dirty = 1;
+						}
+					}
+					if (btn==JOY_B) { // BACK
+						mode = MODE_MENU;
+						dirty = 1;
+						// reusing unused selected to store current
+						// upon entering archive so we can restore
+						// when existing, selected will always
+						// revert to ARCHIVE
+						current = selected;
+						selected = current==app.current ? 2 : 1;
+					}
+				}
+			}
+			else if (event.type==SDL_JOYBUTTONUP) {
 				if (btn==JOY_MENU) {
 					in_menu = 0;
 				}
@@ -1859,6 +2043,7 @@ static void App_menu(void) {
 		
 		int is_charging = getInt(app.usb);
 		if (is_charging!=was_charging) {
+			// if (was_charging) raw_led(0); // why is the red led coming on?
 			was_charging = is_charging;
 			dirty = 1;
 		}
@@ -1871,6 +2056,29 @@ static void App_menu(void) {
 		
 		// render
 		if (dirty) {
+			dirty = 0;
+			
+			char** items;
+			int count;
+			if (current==app.current) {
+				items = save_items;
+				count = NUMBER_OF(save_items);
+			}
+			else {
+				items = load_items;
+				count = NUMBER_OF(load_items);
+			}
+			
+			// TODO: BAD this is update logic in render block
+			if (mode==MODE_MENU) {
+				if (selected<0) selected += count;
+				selected %= count;
+			}
+			
+			int snap = selected==3 ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
+			App_preview(current,0, snap);
+			App_preview(current,1, snap);
+			
 			SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
 			rect.x = (SCREEN_WIDTH - rect.w) / 2;
 			rect.y = (SCREEN_HEIGHT - rect.h);
@@ -1879,10 +2087,17 @@ static void App_menu(void) {
 			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
 			XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
 			
+			// game name
+			char name[MAX_FILE];
+			App_getDisplayName(app.items[current].name, name);
+			
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_Renderer *renderer = app.xgl.renderers[i];
-				XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
-	    		XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, scale ? NULL : &rect);
+				if (i && mode==MODE_ARCHIVE); // don't draw bottom screen in archive mode
+				else {
+					XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
+		    		XGL_RenderCopy(renderer, app.xgl.previews[i], NULL, scale ? NULL : &rect);
+				}
 	    
 				XGL_SetRenderShader(renderer, default_shader);
 				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
@@ -1893,9 +2108,6 @@ static void App_menu(void) {
 					Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
 					
 					// game name
-					char name[MAX_FILE];
-					App_getDisplayName(app.items[current].name, name);
-	
 					#define MAX_LINES 8
 					char* lines[MAX_LINES];
 					int splits[MAX_LINES] = {0};
@@ -1916,7 +2128,82 @@ static void App_menu(void) {
 				}
 				// bottom screen
 				else {
+					int x,y,w,h;
+					if (mode==MODE_MENU) {
+						// center in bottom "screen"
+						y = 0;
+						h = SCREEN_HEIGHT;
+			
+						int mw = 0;
+						for (int i=0; i<count; i++) {
+							Font_getTextSize(font24, items[i], &w, NULL);
+							if (w>mw) mw = w;
+						}
+			
+						w = 8 + mw + 8;
+						x = (SCREEN_WIDTH - w) / 2;
+			
+						int oh = ((count-1) * 40) + 36;
+						y += (h - oh) / 2;
+						h = oh;
+						oh = 40;
+			
+						AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+			
+						for (int i=0; i<count; i++) {
+							Font_renderFunc font_renderer = Font_shadowText;
+							SDL_Color color = WHITE_COLOR;
+				
+							if (i==selected) {
+								AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
+								AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
+								font_renderer = Font_renderText;
+								color = DARK_COLOR;
+							}
+				
+							font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
+						}
+					}
+					else if (mode==MODE_ARCHIVE) {
+						// calculate viewport
+						if (app.count<=rows) {
+							top = 0;
+						}
+						else {
+							int max = app.count - rows;
+							int bottom = top + rows - 1;
+							if (current<top) top = current;
+							else if (current>bottom) top = current - (rows - 1);
+							if (top<0) top = 0;
+							if (top>max) top = max;
+						}
+						int end = top + rows;
+						if (end>app.count) end = app.count;
+				
+						x = 0;
+						y = 0;
+						h = 32;
+				
+						// draw viewport
+						for (int i=top; i<end; i++) {
+							int row = i - top;
+							int oy = y + row * h;
 					
+							Entry* item = &app.items[i];
+							SDL_Color c = item->hidden ? LIGHT_COLOR : WHITE_COLOR;
+							if (i==current) {
+								AA_rect(renderer, x,oy,SCREEN_WIDTH,h, 0, c);
+								c = BLACK_COLOR;
+							}
+					
+							char fit[MAX_FILE];
+							App_getDisplayName(item->name, name);
+							App_trunc(font18, name, SCREEN_WIDTH-40, fit);
+					
+							XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+4,oy+4,24,24});
+							Font_renderText(renderer, font18, fit,	x+32,oy+9, c);
+						}
+					}
 				}
 		
 				XGL_RenderPresent(renderer);
@@ -1928,6 +2215,16 @@ static void App_menu(void) {
 		else {
 			real_SDL_Delay(16);
 		}
+		
+		#define MENU_TIMEOUT 30 * 1000 // thirty seconds
+		if (SDL_GetTicks()>=menu_at+MENU_TIMEOUT) {
+			if (!is_charging) {
+				Device_sleep();
+				dirty = 1;
+			}
+			menu_at = SDL_GetTicks();
+		}
+
 		Device_tick(); // required for power off
 	}
 	
@@ -1965,6 +2262,12 @@ static void App_render(void) {
 		if (i==0) {
 			if (app.osd==OSD_VOLUME) App_OSD(renderer, "VOLUME", settings.volume, 20);
 			else if (app.osd==OSD_BRIGHTNESS) App_OSD(renderer, "BRIGHTNESS", settings.brightness, 10);
+		
+			if (app.fast_forward) {
+				if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
+				XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){48,0,24,24}, &(SDL_Rect){4,4,24,24});
+			}
+		
 		}
 		
 		XGL_RenderPresent(renderer);
@@ -2024,7 +2327,7 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 				drastic_load_state(AUTO_SLOT);
 			}
 			else puts("[LOAD] perform reset");
-			// Device_mute(0); // TODO: 
+			Device_mute(0);
 		}
 		
 		return;
@@ -2098,6 +2401,11 @@ int SDL_PollEvent(SDL_Event* event) {
 		if (Device_handleEvent(event)) continue;
 		
 		if (event->type==SDL_JOYBUTTONDOWN) {
+			if (event->jbutton.button==JOY_L3) {
+				app.fast_forward = !app.fast_forward;
+				if (app.fast_forward) Device_mute(1);
+				else Device_mute(0);
+			}
 			if (event->jbutton.button==JOY_MENU) {
 				continue; // disable drastic menu for now
 			}
