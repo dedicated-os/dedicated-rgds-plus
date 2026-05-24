@@ -1,0 +1,31 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:       bat-mon
+# Required-Start:
+# Required-Stop:
+# Default-Start:  S
+# Default-Stop:
+# Description:    manage battery leds
+### END INIT INFO
+
+case "$1" in
+	start|restart|reload|force-reload|"")
+		if [ -f /sys/class/power_supply/cw2015-battery/capacity ];then
+			echo 1 > /sys/class/anbernic_misc/chrg_dev
+		fi
+		echo 3430 > /sys/class/anbernic_misc/shutdown_voltage
+		echo 3 > /sys/class/anbernic_misc/shutdown_cap
+		;;
+	stop)
+		# no-op
+		;;
+	status)
+		# no-op
+		;;
+	*)
+		echo "Usage: start" >&2
+		exit 3
+		;;
+esac
+
+:

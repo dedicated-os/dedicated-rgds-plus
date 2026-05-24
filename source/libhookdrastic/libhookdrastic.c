@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <sys/ioctl.h>
 #include <linux/input.h>
+#include <alsa/asoundlib.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -204,28 +205,100 @@ static int osd_at;
 
 static int raw_x,raw_y; // touch screen fix
 
+// --------------------------------------------
+// support
+// --------------------------------------------
+
+static inline void touch(const char *path) {
+	int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
+	if (fd >= 0) close(fd);
+}
+static inline int getInt(int f) {
+	if (f<0) return 0;
+
+	char b[32];
+	int n = pread(f, b, sizeof(b) - 1, 0);
+	if (n<=0) return 0;
+
+	b[n] = '\0';
+	return atoi(b);
+}
+static inline void setInt(int f, int value) {
+    char buffer[16];
+    int len = sprintf(buffer, "%d\n", value);
+	lseek(f, 0, SEEK_SET);
+    write(f, buffer, len);
+}
+static inline void getString(void) {
+	
+}
+static inline void putString(const char* path, const char* value) {
+	int f = open(path, O_WRONLY);
+	if (f<0) return;
+	write(f, value, strlen(value));
+	close(f);
+}
+static inline void putInt(const char* path, int value) {
+	char buffer[16];
+	sprintf(buffer, "%d", value);
+	putString(path, buffer);
+}
+static inline int exists(const char* path) {
+	return access(path, F_OK)==0;
+}
 
 // --------------------------------------------
 // raw HMI controls
 // --------------------------------------------
 
-// TODO: tmp, these aren't raw and the spawned 
-// shell process causes slowdown and audio issues
+static struct {
+	int bri0;
+	int bri1;
+	int led0;
+	int led1;
+	snd_mixer_t *mix;
+	snd_mixer_elem_t *dac;
+} raw;
+static void raw_init(void) {
+	raw.bri0 = open("/sys/class/backlight/backlight1/brightness", O_WRONLY | O_CLOEXEC);
+	raw.bri1 = open("/sys/class/backlight/backlight/brightness", O_WRONLY | O_CLOEXEC);
+	raw.led0 = open("/sys/class/anbernic_misc/lowpwr_led", O_WRONLY | O_CLOEXEC);
+	raw.led1 = open("/sys/class/anbernic_misc/work_led", O_WRONLY | O_CLOEXEC);
+	
+	// I hate audio code
+	snd_mixer_open(&raw.mix, 0);
+	snd_mixer_attach(raw.mix, "hw:0");
+	snd_mixer_selem_register(raw.mix, NULL, NULL);
+	snd_mixer_load(raw.mix);
+
+	snd_mixer_selem_id_t *sid;
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, 0);
+	snd_mixer_selem_id_set_name(sid, "DAC");
+	raw.dac = snd_mixer_find_selem(raw.mix, sid);
+}
+static void raw_quit(void) {
+	close(raw.bri0);
+	close(raw.bri1);
+	close(raw.led0);
+	close(raw.led1);
+	snd_mixer_close(raw.mix);
+}
 
 static void raw_vol(int value) {
-	char cmd[256];
-	sprintf(cmd, "vol %i", value);
-	system(cmd);
+	snd_mixer_selem_set_playback_volume_all(raw.dac, value);
 }
 static void raw_bri(int value) {
-	char cmd[256];
-	sprintf(cmd, "bri %i", value);
-	system(cmd);
+	setInt(raw.bri0, value);
+	setInt(raw.bri1, value);
 }
 static void raw_led(int enable) {
-	char cmd[256];
-	sprintf(cmd, "led %s", enable ? "on" : "off");
-	system(cmd);
+	setInt(raw.led0, 0);
+	setInt(raw.led1, enable);
+	// #define SUPPRESS_PATH "/tmp/suppress-leds"
+	// if (enable) unlink(SUPPRESS_PATH);
+	// else touch(SUPPRESS_PATH);
+	// #undef SUPPRESS_PATH
 }
 
 // --------------------------------------------
@@ -596,38 +669,6 @@ static void drastic_quit(void) {
 	drastic_quit_t d_quit = GET_PFN(app.base + 0x0000e8d0); // nm ./drastic | grep quit
 	void* sys = drastic_var_system();	
 	d_quit(sys);
-}
-
-// --------------------------------------------
-// support
-// --------------------------------------------
-
-static inline int getInt(int f) {
-	if (f<0) return 0;
-
-	char b[32];
-	int n = pread(f, b, sizeof(b) - 1, 0);
-	if (n<=0) return 0;
-
-	b[n] = '\0';
-	return atoi(b);
-}
-static inline void getString(void) {
-	
-}
-static inline void putString(const char* path, const char* value) {
-	int f = open(path, O_WRONLY);
-	if (f<0) return;
-	write(f, value, strlen(value));
-	close(f);
-}
-static inline void putInt(const char* path, int value) {
-	char buffer[16];
-	sprintf(buffer, "%d", value);
-	putString(path, buffer);
-}
-static inline int exists(const char* path) {
-	return access(path, F_OK)==0;
 }
 
 static int compareNatural(const char *a, const char *b) {
@@ -1578,6 +1619,7 @@ static void App_preload(void) {
 	
 	// before even drastic loads
 	// this is drastic setup logic
+	raw_init();
 	
 	Settings_load();
 	
@@ -1679,6 +1721,8 @@ static void App_init(void) {
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
 	app.usb = open(USB_PATH "online", O_RDONLY);
 	app.lid = open(LID_PATH, O_RDONLY);
+	
+	raw_led(0);
 }
 static void App_quit(void) {
 	SDL_Log("App_quit");
@@ -1715,6 +1759,7 @@ static void App_quit(void) {
 	XGL_Quit();
 	
 	Settings_save();
+	raw_quit();
 }
 
 // TODO: no longer antialiased, switch to images
@@ -2041,9 +2086,10 @@ static void App_menu(void) {
 			}
 		}
 		
+		// TODO: should these be running every frame?
+		// TODO: need to duplicate logic in App_render()
 		int is_charging = getInt(app.usb);
 		if (is_charging!=was_charging) {
-			// if (was_charging) raw_led(0); // why is the red led coming on?
 			was_charging = is_charging;
 			dirty = 1;
 		}
@@ -2206,8 +2252,8 @@ static void App_menu(void) {
 					}
 				}
 		
-				XGL_RenderPresent(renderer);
 				if (app.capture) App_capture("menu", i);
+				XGL_RenderPresent(renderer);
 				rect.y = 0;
 			}
 			app.capture = 0;
@@ -2270,8 +2316,8 @@ static void App_render(void) {
 		
 		}
 		
-		XGL_RenderPresent(renderer);
 		if (app.capture) App_capture("game", i);
+		XGL_RenderPresent(renderer);
 		rect.y = 0;
 	}
 	app.capture = 0;
