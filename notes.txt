@@ -1,6 +1,3 @@
-figure out led situation
-	boots green
-	turns red after ~5 seconds
-	stays red unless turned off manually
-	turns green+orange on usb
-	turns red when unplugged
+boot logo
+shutdown screen
+empty screen

@@ -1349,13 +1349,15 @@ static void App_preview(int game, int screen, int snap) {
 	
 	SDL_FreeSurface(tmp);
 }
-static int App_capture(const char *name, int i) {
+static int App_capture(const char *name) {
 	char path[MAX_PATH];
-	sprintf(path, "/tmp/capture-%s-%i.bmp", name, i);
-	SDL_Surface *tmp = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
-	XGL_RenderReadPixels(app.xgl.renderers[i], NULL, SDL_PIXELFORMAT_ARGB8888, tmp->pixels, tmp->pitch);
+	sprintf(path, "/tmp/capture-%s.bmp", name);
+	SDL_Surface *tmp = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT*2, 32, SDL_PIXELFORMAT_ARGB8888);
+	XGL_RenderReadPixels(app.xgl.renderers[0], NULL, SDL_PIXELFORMAT_ARGB8888, tmp->pixels, tmp->pitch);
+	XGL_RenderReadPixels(app.xgl.renderers[1], NULL, SDL_PIXELFORMAT_ARGB8888, tmp->pixels + (SCREEN_HEIGHT*tmp->pitch), tmp->pitch);
 	SDL_SaveBMP(tmp, path);
 	SDL_FreeSurface(tmp);
+	app.capture = 0;
 }
 static void App_sync(int force) {
 	if (force) app.synced = 0;
@@ -2251,10 +2253,13 @@ static void App_menu(void) {
 						}
 					}
 				}
-		
-				if (app.capture) App_capture("menu", i);
-				XGL_RenderPresent(renderer);
+				
 				rect.y = 0;
+			}
+			
+			if (app.capture) App_capture("menu");
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
 			}
 			app.capture = 0;
 		}
@@ -2315,12 +2320,13 @@ static void App_render(void) {
 			}
 		
 		}
-		
-		if (app.capture) App_capture("game", i);
-		XGL_RenderPresent(renderer);
 		rect.y = 0;
 	}
-	app.capture = 0;
+	
+	if (app.capture) App_capture("game");
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		XGL_RenderPresent(app.xgl.renderers[i]);
+	}
 	
 	if (osd_at+1000<SDL_GetTicks()) app.osd = OSD_NONE;
 }
@@ -2446,32 +2452,23 @@ int SDL_PollEvent(SDL_Event* event) {
 		
 		if (Device_handleEvent(event)) continue;
 		
-		if (event->type==SDL_JOYBUTTONDOWN) {
-			if (event->jbutton.button==JOY_L3) {
-				app.fast_forward = !app.fast_forward;
-				if (app.fast_forward) Device_mute(1);
-				else Device_mute(0);
-			}
-			if (event->jbutton.button==JOY_MENU) {
-				continue; // disable drastic menu for now
-			}
-		}
-		else if (event->type==SDL_JOYBUTTONUP) {
+		if (event->type==SDL_JOYBUTTONUP) {
 			if (event->jbutton.button==JOY_MENU) {
 				App_menu();
 				continue;
 			}
 		}
+		
+		if (event->type==SDL_KEYDOWN) {
+			if (event->key.keysym.scancode==SCAN_BACK) {
+				app.fast_forward = !app.fast_forward;
+				if (app.fast_forward) Device_mute(1);
+				else Device_mute(0);
+			}
+		}
 	
 		// LOG_event(event);
 		switch (event->type) {
-			case SDL_KEYUP: {
-				// TODO: tmp poweroff
-				if (event->key.keysym.scancode==SCAN_POWER) {
-					unlink("/tmp/exec_loop");
-					drastic_quit();
-				}
-			} break;
 			case SDL_FINGERDOWN:
 			case SDL_FINGERUP:
 			case SDL_FINGERMOTION: {
