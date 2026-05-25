@@ -72,8 +72,9 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 
 #define BLACK_TRIAD 	0x00,0x00,0x00
 #define WHITE_TRIAD 	0xff,0xff,0xff
-#define LIGHT_TRIAD 	0xbb,0xbb,0xbb
+#define LIGHT_TRIAD 	0x99,0x99,0x99
 #define DARK_TRIAD 		0x33,0x33,0x33
+#define MID_TRIAD 		0x44,0x44,0x44
 #define RED_TRIAD		0xff,0x33,0x33
 #define GREEN_TRIAD		0x33,0xcc,0x33
 #define YELLOW_TRIAD	0xff,0xcc,0x00
@@ -1459,7 +1460,7 @@ static int App_wrap(Font* font, char* text, int max_lines, char** lines, int* sp
 		Font_getTextSize(font, test_line, &line_width, NULL);
 		line_width += font->offset_x * 2;
 		
-		int ow = 6 + 6;
+		int ow = 20 + 20;
 		if (line_width<=SCREEN_WIDTH-ow) {
 			strcpy(line, test_line);
 		}
@@ -1695,7 +1696,7 @@ static void App_bye(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 		XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
 
-		XGL_SetRenderDrawColor(renderer, 64,64,64,255);
+		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
@@ -1720,7 +1721,7 @@ static void App_empty(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 		XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
 
-		XGL_SetRenderDrawColor(renderer, 64,64,64,255);
+		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
@@ -1924,6 +1925,111 @@ static void App_quit(void) {
 	raw_quit();
 }
 
+static void App_bootlogo(void) {
+	int bootlogo = 1;
+	int dirty = 1;
+	SDL_Event event;
+	
+	const char *hints[] = {
+		"Scale", "MENU+L2",
+		"Lid",	"L2",
+		"Mic",	"R2",
+		"Sharpness", "MENU+R2",
+		"Brightness", "MENU+VOLUME",
+		"Fast Forward", "HOME/BACK",
+		NULL,
+	};
+	
+	while (bootlogo) {
+		while (bootlogo && Repeater_pollEvent(&event)) {
+			int btn = event.jbutton.button;
+			if (Device_handleEvent(&event)) {
+				dirty = 1;
+				continue;
+			}
+			
+			if (event.type==SDL_JOYBUTTONDOWN) {
+				if (btn==JOY_SELECT) {
+					bootlogo = 0;
+					break;
+				}
+			}
+		}
+		
+		if (dirty) {
+			dirty = 0;
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_Renderer *renderer = app.xgl.renderers[i];
+				XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
+
+				XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
+				XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+			
+				// top screen
+				if (i==0) {
+					Font_shadowText(renderer, font24, "Dedicated OS", 20,20, LIGHT_COLOR);
+					Font_shadowText(renderer, font36, "Nintendo DS", 20, 56+(i*36), WHITE_COLOR);
+				
+				}
+				// bottom screen
+				else {
+					int lw = 0;
+					int rw = 0;
+					
+					// layout pass
+					for (int i = 0; hints[i] != NULL; i += 2) {
+						const char *hint = hints[i];
+						const char *trigger = hints[i + 1];
+						
+						int w,h;
+						Font_getTextSize(font16, hint, &w, &h);
+						if (i<6 && w>lw) lw = w; // left
+						else if (i>=6 && w>rw) rw = w; // right
+						
+						Font_getTextSize(font24, trigger, &w, &h);
+						if (i<6 && w>lw) lw = w; // left
+						else if (i>=6 && w>rw) rw = w; // right
+					}
+					
+					int pad = (SCREEN_WIDTH - lw - rw) / 3;
+					int ox = pad;
+					int oy = (SCREEN_HEIGHT - 72 - 72 - 40) / 2;
+					
+					int x = ox;
+					int y = oy;
+					
+					// render pass
+					for (int i = 0; hints[i] != NULL; i += 2) {
+						const char *hint = hints[i];
+						const char *trigger = hints[i + 1];
+						
+						int j = i % 6;
+						if (i==6) {
+							x = ox + lw + pad;
+							y = oy;
+						}
+						
+						Font_shadowText(renderer, font16, hint, x,y, LIGHT_COLOR);
+						Font_shadowText(renderer, font24, trigger, x,y+20, WHITE_COLOR);
+						
+						y += 72;
+					}
+				}
+			}
+			
+			if (app.capture) App_capture("menu");
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
+			}
+			app.capture = 0;
+		}
+		else {
+			real_SDL_Delay(16);
+		}
+	}
+}
+
 static void App_extra(void) {
 	SDL_Surface* tmp;
 	if (!app.xgl.overlay) {
@@ -2056,6 +2162,12 @@ static void App_menu(void) {
 				menu_at = SDL_GetTicks();
 				
 				if (mode==MODE_MENU) {
+					if (btn==JOY_SELECT) {
+						// TODO: tmp
+						App_bootlogo();
+						dirty = 1;
+					}
+					
 					if (btn==JOY_B) { // BACK
 						if (current!=app.current) {
 							current = app.current;

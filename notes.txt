@@ -1,18 +1,7 @@
-boot logo
-
-	SCALE 
-		MENU + L2
-	SHARPNESS
-		MENU + R2
-	LID
-		L2
-	MIC
-		R2
-	BRIGHTNESS
-		MENU + VOLUME
-	FAST FORWARD
-		HOME/BACK
-	
 proper mic patch
+	there isn't one
+	stock just triggers mic button based on
+		audio level and a fixed threshold
+	which is just a waste of power
 
-
+convert overlay to shader?
