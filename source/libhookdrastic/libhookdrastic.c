@@ -1087,11 +1087,14 @@ static int Repeater_pollEvent(SDL_Event* event) {
 // --------------------------------------------
 // app declarations
 // --------------------------------------------
+static void App_init(void);
 static void App_quit(void);
 static void App_load(void);
 static void App_save(void);
 static void App_reset(void);
+static void App_extra(void);
 static void App_sync(int force);
+static void App_bye(void);
 
 // --------------------------------------------
 // device features
@@ -1148,6 +1151,10 @@ static void Device_sleep(void) {
 	raw_led(0);
 }
 static void Device_poweroff(void) {
+	App_bye();
+	App_bye();
+	sleep(2);
+	
 	raw_vol(0);
 	App_save();
 	unlink("/tmp/exec_loop");
@@ -1571,16 +1578,169 @@ static void App_trunc(Font* font, const char* text, int max_width, char* out_tex
 	out_text[i] = '\0';
 }
 
+static void AA_rect(XGL_Renderer *renderer, int x, int y, int w, int h, int s, SDL_Color c) {
+	if (s==0) {
+		// body
+		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+		const SDL_Rect rects[] = {
+			{x + 0, y+1,   1, h-2}, // left
+			{x + 1, y+0, w-2, h  }, // middle
+			{x+w-1, y+1,   1, h-2}, // right
+		};
+		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+	}
+	else {
+		// outline
+		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+		const SDL_Rect rects[] = {
+			{x + 0, y + 1,   1, h-2}, // left
+			{x + 1, y + 0, s-1, h  }, // left
+			{x + s, y + 0, w-8, s  }, // top
+			{x + s, y+h-s, w-8, s  }, // bottom
+			{x+w-s, y + 0, s-1, h  }, // right
+			{x+w-1, y + 1,   1, h-2}, // right
+		};
+		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+	}
+}
+static void AA_bolt(XGL_Renderer *renderer, int x, int y, SDL_Color c) {
+	const SDL_Rect rects[] = {
+		// top left
+		{x+ 6,y+ 0, 6,2},
+		{x+ 5,y+ 2, 6,2},
+		{x+ 4,y+ 4, 6,2},
+		{x+ 3,y+ 6, 6,2},
+		// middle
+		{x+ 9,y+ 7,11,1},
+		{x+ 2,y+ 8,17,2},
+		{x+ 1,y+10,17,2},
+		{x+ 0,y+12,11,1},
+		// bottom right
+		{x+11,y+12, 6,2},
+		{x+10,y+14, 6,2},
+		{x+ 9,y+16, 6,2},
+		{x+ 8,y+18, 6,2},
+	};
+	XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
+	XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
+}
+static void AA_bat(XGL_Renderer *renderer, int x, int y, int battery, SDL_Color c) {
+	AA_rect(renderer, x,y,48,28, 4, c);
+	AA_rect(renderer, x+47,y+8,5,12, 0, c);
+	
+	int w = CEIL_TO(battery,20) * 30 / 100;
+	if (w>0) AA_rect(renderer, x+8,y+8,w+2,12, 0, c);
+}
+static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, int shadowed) {
+	int x = 571;
+	int y = 17;
+	
+	SDL_Color c = LIGHT_COLOR;
+
+	if (shadowed) AA_bat(renderer, x+2,y+2, battery, BLACK_COLOR);
+	AA_bat(renderer, x,y, battery, c);
+
+	if (is_charging && battery<100) {
+		y += 4;
+		
+		char percent[8];
+		sprintf(percent, "%i%%", battery);
+		int w = 0;
+		Font_getTextSize(font24, percent, &w, NULL);
+		
+		x -= w + 4;
+		Font_shadowText(renderer, font24, percent, x,y, c);
+
+		x -= 24;
+		AA_bolt(renderer, x+2,y+2,BLACK_COLOR);
+		AA_bolt(renderer, x,y,c);
+	}
+}
+static void App_OSD(XGL_Renderer *renderer, char* label, int value, int max) {
+	int nh = 28;
+	int x,y,w,h;
+	Font_getTextSize(font16, label, &w, &h);
+	w = 252;
+	h = 64;
+	x = (SCREEN_WIDTH - w) / 2;
+	y = (SCREEN_HEIGHT - h) - 32;
+	
+	AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x60));
+
+	Font_shadowText(renderer, font16, label, x+8, y+8, LIGHT_COLOR);
+	
+	int nw = max==10?20:8;
+	int no = max==10?24:12;
+	for (int i=0; i<max; i++) {
+		int nx = x + 8;
+		int ny = y + 28;
+		AA_rect(renderer, nx+i*no+2,ny+2,nw,nh, 0, BLACK_COLOR);
+		if (i<value) {
+			AA_rect(renderer, nx+i*no,ny,nw,nh, 0, WHITE_COLOR);
+		}
+	}
+}
+static void App_bye(void) {
+	App_extra();
+	
+	int battery = getInt(app.bat);
+	int is_charging = getInt(app.usb);
+	const char* lines[] = {
+		"Saving &",
+		"shutting",
+		"down...",
+	};
+	
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		XGL_Renderer *renderer = app.xgl.renderers[i];
+		XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
+
+		XGL_SetRenderDrawColor(renderer, 64,64,64,255);
+		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+		
+		if (i==0) {
+			App_battery(renderer, battery,is_charging,1);	
+			Font_shadowText(renderer, font24, "Dedicated OS", 20,20, LIGHT_COLOR);
+			for (int j=0; j<3; j++) {
+				Font_shadowText(renderer, font36, lines[j], 20, 56+(j*36), WHITE_COLOR);
+			}
+		}
+
+		XGL_RenderPresent(renderer);
+	}
+}
+static void App_empty(void) {
+	SDL_Log("App_empty");
+
+	App_init();
+	App_extra();
+	
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		XGL_Renderer *renderer = app.xgl.renderers[i];
+		XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
+
+		XGL_SetRenderDrawColor(renderer, 64,64,64,255);
+		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+		
+		if (i==0) {
+			Font_shadowText(renderer, font24, "Dedicated OS", 20,20, LIGHT_COLOR);
+			Font_shadowText(renderer, font36, "No games found", 20, 56, WHITE_COLOR);
+		}
+
+		XGL_RenderPresent(renderer);
+	}
+	
+	sleep(5);
+	unlink("/tmp/exec_loop");
+	App_quit();
+}
+
 static int App_sort(const void* a, const void* b) {
 	const Entry *i = (const Entry *)a;
 	const Entry *j = (const Entry *)b;
 	return compareNatural(i->name, j->name);
-}
-static void App_empty(void) {
-	// TODO: 
-	
-	sleep(5);
-	App_quit();
 }
 static void App_set(int i) {
 	if (!app.count) App_empty();
@@ -1616,8 +1776,8 @@ static int App_next(int start, int dir) {
 	return start;
 }
 
-static void App_preload(void) {
-	SDL_Log("App_preload");
+static void App_boot(void) {
+	SDL_Log("App_boot");
 	
 	// before even drastic loads
 	// this is drastic setup logic
@@ -1764,123 +1924,7 @@ static void App_quit(void) {
 	raw_quit();
 }
 
-// TODO: no longer antialiased, switch to images
-static void AA_rect(XGL_Renderer *renderer, int x, int y, int w, int h, int s, SDL_Color c) {
-	if (s==0) {
-		// body
-		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
-		const SDL_Rect rects[] = {
-			{x + 0, y+1,   1, h-2}, // left
-			{x + 1, y+0, w-2, h  }, // middle
-			{x+w-1, y+1,   1, h-2}, // right
-		};
-		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
-	}
-	else {
-		// outline
-		XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
-		const SDL_Rect rects[] = {
-			{x + 0, y + 1,   1, h-2}, // left
-			{x + 1, y + 0, s-1, h  }, // left
-			{x + s, y + 0, w-8, s  }, // top
-			{x + s, y+h-s, w-8, s  }, // bottom
-			{x+w-s, y + 0, s-1, h  }, // right
-			{x+w-1, y + 1,   1, h-2}, // right
-		};
-		XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
-	}
-}
-static void AA_bolt(XGL_Renderer *renderer, int x, int y, SDL_Color c) {
-	const SDL_Rect rects[] = {
-		// top left
-		{x+ 6,y+ 0, 6,2},
-		{x+ 5,y+ 2, 6,2},
-		{x+ 4,y+ 4, 6,2},
-		{x+ 3,y+ 6, 6,2},
-		// middle
-		{x+ 9,y+ 7,11,1},
-		{x+ 2,y+ 8,17,2},
-		{x+ 1,y+10,17,2},
-		{x+ 0,y+12,11,1},
-		// bottom right
-		{x+11,y+12, 6,2},
-		{x+10,y+14, 6,2},
-		{x+ 9,y+16, 6,2},
-		{x+ 8,y+18, 6,2},
-	};
-	XGL_SetRenderDrawColor(renderer, c.r,c.g,c.b,c.a);
-	XGL_RenderFillRects(renderer, rects, NUMBER_OF(rects));
-}
-static void AA_bat(XGL_Renderer *renderer, int x, int y, int battery, SDL_Color c) {
-	AA_rect(renderer, x,y,48,28, 4, c);
-	AA_rect(renderer, x+47,y+8,5,12, 0, c);
-	
-	int w = CEIL_TO(battery,20) * 30 / 100;
-	if (w>0) AA_rect(renderer, x+8,y+8,w+2,12, 0, c);
-}
-static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, int shadowed) {
-	int x = 571;
-	int y = 17;
-	
-	SDL_Color c = LIGHT_COLOR;
-
-	if (shadowed) AA_bat(renderer, x+2,y+2, battery, BLACK_COLOR);
-	AA_bat(renderer, x,y, battery, c);
-
-	if (is_charging && battery<100) {
-		y += 4;
-		
-		char percent[8];
-		sprintf(percent, "%i%%", battery);
-		int w = 0;
-		Font_getTextSize(font24, percent, &w, NULL);
-		
-		x -= w + 4;
-		Font_shadowText(renderer, font24, percent, x,y, c);
-
-		x -= 24;
-		AA_bolt(renderer, x+2,y+2,BLACK_COLOR);
-		AA_bolt(renderer, x,y,c);
-	}
-}
-static void App_OSD(XGL_Renderer *renderer, char* label, int value, int max) {
-	int nh = 28;
-	int x,y,w,h;
-	Font_getTextSize(font16, label, &w, &h);
-	w = 252;
-	h = 64;
-	x = (SCREEN_WIDTH - w) / 2;
-	y = (SCREEN_HEIGHT - h) - 32;
-	
-	AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x60));
-
-	Font_shadowText(renderer, font16, label, x+8, y+8, LIGHT_COLOR);
-	
-	int nw = max==10?20:8;
-	int no = max==10?24:12;
-	for (int i=0; i<max; i++) {
-		int nx = x + 8;
-		int ny = y + 28;
-		AA_rect(renderer, nx+i*no+2,ny+2,nw,nh, 0, BLACK_COLOR);
-		if (i<value) {
-			AA_rect(renderer, nx+i*no,ny,nw,nh, 0, WHITE_COLOR);
-		}
-	}
-}
-
-static void App_menu(void) {
-	SDL_Log("enter menu");
-	app.menu = 1;
-	Device_mute(1);
-	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
-	
-	static int last_battery = 0;
-	static int was_charging = 0;
-	
-	int current = app.current;
-	App_screenshot(current, 0, SNAP_CURRENT);
-	App_screenshot(current, 1, SNAP_CURRENT);
-	
+static void App_extra(void) {
 	SDL_Surface* tmp;
 	if (!app.xgl.overlay) {
 		SDL_Log("create overlay");
@@ -1906,6 +1950,22 @@ static void App_menu(void) {
 	if (!app.xgl.icons) {
 		app.xgl.icons = XGL_LoadTexture(app.xgl.renderers[0], ASSETS_PATH "/icons.png");
 	}
+	
+}
+static void App_menu(void) {
+	SDL_Log("enter menu");
+	app.menu = 1;
+	Device_mute(1);
+	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
+	
+	static int last_battery = 0;
+	static int was_charging = 0;
+	
+	int current = app.current;
+	App_screenshot(current, 0, SNAP_CURRENT);
+	App_screenshot(current, 1, SNAP_CURRENT);
+	
+	App_extra();
 	
 	char* save_items[] = {
 		"SAVE",
@@ -2737,7 +2797,7 @@ static inline void hook(void) {
 static drastic_main_t drastic_main = NULL;
 static int override_args(int argc, char **argv, char **envp) {
 	hook();
-	App_preload();
+	App_boot();
 	char *new_argv[] = { argv[0], app.game_path, NULL };
 	
 	puts("[LOAD] resume requested");

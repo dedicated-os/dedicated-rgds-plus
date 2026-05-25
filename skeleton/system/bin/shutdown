@@ -15,6 +15,6 @@ esac
 
 echo s > /proc/sysrq-trigger
 echo u > /proc/sysrq-trigger
-sleep 2
+sleep 1
 VALUE=$(i2cget -f -y 0 0x20 0xf4)
 i2cset -f -y 0 0x20 0xf4 $((VALUE | 1))

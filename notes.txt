@@ -1,3 +1,18 @@
 boot logo
-shutdown screen
-empty screen
+
+	SCALE 
+		MENU + L2
+	SHARPNESS
+		MENU + R2
+	LID
+		L2
+	MIC
+		R2
+	BRIGHTNESS
+		MENU + VOLUME
+	FAST FORWARD
+		HOME/BACK
+	
+proper mic patch
+
+
