@@ -47,7 +47,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define ASSETS_PATH		SYSTEM_PATH "/assets"
 #define USERDATA_PATH	SDCARD_PATH "/userdata"
 
-#define BAT_PATH 		"/sys/class/power_supply/battery/"
+#define BAT_PATH 		"/sys/class/power_supply/cw2015-battery/"
 #define USB_PATH 		"/sys/class/power_supply/usb/"
 #define CPU_PATH		"/sys/devices/system/cpu/cpu0/cpufreq/"
 #define LID_PATH		"/sys/class/anbernic_misc/hallkey"
@@ -340,7 +340,6 @@ static void Settings_save(void) {
 	fclose(file);
 }
 static void Settings_setVolume(int value) {
-	char cmd[MAX_FILE];
 	static const uint8_t raw[21] = {
 		  0, // mute
 		128, // 0
@@ -369,7 +368,6 @@ static void Settings_setVolume(int value) {
 	settings.volume = value;
 }
 static void Settings_setBrightness(int value) {
-	char cmd[MAX_FILE];
 	static const uint8_t raw[11] = {
 		  1, // 0
 		  3, // 

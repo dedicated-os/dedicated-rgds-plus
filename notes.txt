@@ -1,7 +1,8 @@
-proper mic patch
-	there isn't one
-	stock just triggers mic button based on
-		audio level and a fixed threshold
-	which is just a waste of power
+is this done?
+is release setup?
 
-convert overlay to shader?
+opening lid sometimes doesn't wake from sleep
+	need to press power
+	or maybe I'm impatient
+
+convert gradient overlay to shader?
