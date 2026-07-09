@@ -975,11 +975,92 @@ void Fonts_quit(void) {
 // button repeater
 // --------------------------------------------
 
-#define REPEAT_TIMEOUT	300
-#define REPEAT_INTERVAL 100
-#define DEADZONE 12000
+#define PAD_REPEAT_TIMEOUT	300
+#define PAD_REPEAT_INTERVAL 100
+#define PAD_DEADZONE 12000
 
-static int Repeater_fakeButtonEvent(SDL_Event* event, int btn, int press) {
+typedef enum {
+	PAD_ID_NONE = -1,
+	
+	PAD_ID_UP,
+	PAD_ID_DOWN,
+	PAD_ID_LEFT,
+	PAD_ID_RIGHT,
+	
+	PAD_ID_A,
+	PAD_ID_B,
+	PAD_ID_X,
+	PAD_ID_Y,
+	
+	PAD_ID_START,
+	PAD_ID_SELECT,
+	
+	PAD_ID_L1,
+	PAD_ID_R1,
+	PAD_ID_L2,
+	PAD_ID_R2,
+	PAD_ID_L3,
+	PAD_ID_R3,
+	
+	PAD_ID_MENU,
+	PAD_ID_BACK,
+	PAD_ID_PLUS,
+	PAD_ID_MINUS,
+	PAD_ID_OPEN,
+	PAD_ID_CLOSE,
+	PAD_ID_POWER,
+	
+	PAD_ID_COUNT,
+} PadButtonId;
+typedef enum {
+	PAD_NONE 		= 0,
+	PAD_UP			= 1u << PAD_ID_UP,
+	PAD_DOWN		= 1u << PAD_ID_DOWN,
+	PAD_LEFT		= 1u << PAD_ID_LEFT,
+	PAD_RIGHT		= 1u << PAD_ID_RIGHT,
+	
+	PAD_A			= 1u << PAD_ID_A,
+	PAD_B			= 1u << PAD_ID_B,
+	PAD_X			= 1u << PAD_ID_X,
+	PAD_Y			= 1u << PAD_ID_Y,
+	
+	PAD_START		= 1u << PAD_ID_START,
+	PAD_SELECT		= 1u << PAD_ID_SELECT,
+	
+	PAD_L1			= 1u << PAD_ID_L1,
+	PAD_R1			= 1u << PAD_ID_R1,
+	PAD_L2			= 1u << PAD_ID_L2,
+	PAD_R2			= 1u << PAD_ID_R2,
+	PAD_L3			= 1u << PAD_ID_L3,
+	PAD_R3			= 1u << PAD_ID_R3,
+	
+	PAD_MENU		= 1u << PAD_ID_MENU,
+	PAD_BACK		= 1u << PAD_ID_BACK,
+	PAD_PLUS		= 1u << PAD_ID_PLUS,
+	PAD_MINUS		= 1u << PAD_ID_MINUS,
+	PAD_OPEN		= 1u << PAD_ID_OPEN,
+	PAD_CLOSE		= 1u << PAD_ID_CLOSE,
+	PAD_POWER		= 1u << PAD_ID_POWER,
+} PadButton;
+
+static struct {
+	uint32_t is_pressed;
+	uint32_t just_pressed;
+	uint32_t just_released;
+	uint32_t just_repeated;
+	uint32_t repeat_at[PAD_ID_COUNT];
+} pad;
+
+int Pad_anyJustPressed(void)	{ return pad.just_pressed!=PAD_NONE; }
+int Pad_anyPressed(void)		{ return pad.is_pressed!=PAD_NONE; }
+int Pad_anyJustReleased(void)	{ return pad.just_released!=PAD_NONE; }
+
+int Pad_justPressed(PadButton btn)	{ return pad.just_pressed & btn; }
+int Pad_isPressed(PadButton btn)	{ return pad.is_pressed & btn; }
+int Pad_justReleased(PadButton btn)	{ return pad.just_released & btn; }
+int Pad_justRepeated(PadButton btn)	{ return pad.just_repeated & btn; }
+
+static int Pad_fakeButtonEvent(SDL_Event* event, int btn, int press) {
 	SDL_memset(event, 0, sizeof(*event));
 	event->type = event->jbutton.type = press ? SDL_JOYBUTTONDOWN : SDL_JOYBUTTONUP;
 	event->jbutton.which  = 0;
@@ -988,7 +1069,7 @@ static int Repeater_fakeButtonEvent(SDL_Event* event, int btn, int press) {
 	event->jbutton.timestamp = SDL_GetTicks();
 	return 1;
 }
-static int Repeater_fakeHatEvent(SDL_Event* event, int value) {
+static int Pad_fakeHatEvent(SDL_Event* event, int value) {
 	SDL_memset(event, 0, sizeof(*event));
 
 	event->type = SDL_JOYHATMOTION;
@@ -1000,46 +1081,43 @@ static int Repeater_fakeHatEvent(SDL_Event* event, int value) {
 
 	return 1;
 }
-static int Repeater_pollEvent(SDL_Event* event) {
+
+static void Pad_reset(void) {
+	pad.is_pressed = PAD_NONE;
+	pad.just_pressed = PAD_NONE;
+	pad.just_released = PAD_NONE;
+	pad.just_repeated = PAD_NONE;
+}
+static void Pad_consume(PadButton btn) {
+	// pad.is_pressed is intentionally omitted
+	pad.just_pressed  &= ~btn;
+	pad.just_released &= ~btn;
+	pad.just_repeated &= ~btn;
+}
+static int Pad_nextFrame(void) {
+	pad.just_pressed  = PAD_NONE;
+	pad.just_released = PAD_NONE;
+	pad.just_repeated = PAD_NONE;
+	
+	uint32_t tick = SDL_GetTicks();
+	for (int i=0; i<PAD_ID_COUNT; i++) {
+		uint32_t mask = 1 << i;
+		if ((pad.is_pressed & mask) && (tick>=pad.repeat_at[i])) {
+			pad.just_repeated |= mask;
+			pad.repeat_at[i] += PAD_REPEAT_INTERVAL;
+		}
+	}
+}
+static int Pad_pollEvent(SDL_Event* event) {
 	static int ax = 0;
 	static int ay = 0;
 	static int last_pad = HAT_NEUTRAL;
 	
-	static int menu_down = 0;
-	static int plus_next = 0;
-	static int minus_next = 0;
-	
-	int result = 0;
-	
-	int now = SDL_GetTicks();
-	if (plus_next && now>=plus_next) {
-		result = Repeater_fakeButtonEvent(event, JOY_PLUS, 1);
-		plus_next += REPEAT_INTERVAL;
-	}
-	else if (minus_next && now>=minus_next) {
-		result = Repeater_fakeButtonEvent(event, JOY_MINUS, 1);
-		minus_next += REPEAT_INTERVAL;
-	}
-
-	else {
-		result = real_SDL_PollEvent(event);
-	}
-	
+	int result = real_SDL_PollEvent(event);
 	if (!result) return result;
 	
-	if (event->type==SDL_JOYBUTTONDOWN) {
-		int now = SDL_GetTicks();
-
-		if (event->jbutton.button==JOY_MENU)					menu_down = 1;
-		if (!plus_next && event->jbutton.button==JOY_PLUS)		plus_next = now + REPEAT_TIMEOUT;
-		if (!minus_next && event->jbutton.button==JOY_MINUS)	minus_next = now + REPEAT_TIMEOUT;
-	}
-	else if (event->type==SDL_JOYBUTTONUP) {
-		if (event->jbutton.button==JOY_MENU) 	menu_down = 0;
-		if (event->jbutton.button==JOY_PLUS) 	plus_next = 0;
-		if (event->jbutton.button==JOY_MINUS)	minus_next = 0;
-	}
-	else if (event->type==SDL_JOYAXISMOTION) {
+	// dupe left stick to dpad
+	if (event->type==SDL_JOYAXISMOTION) {
 		int lx = ax;
 		int ly = ay;
 		int pad = last_pad;
@@ -1048,11 +1126,11 @@ static int Repeater_pollEvent(SDL_Event* event) {
 		else if (event->jaxis.axis==AXIS_LY) ay = event->jaxis.value;
 
 		if (ax!=lx) {
-			if (ax>DEADZONE) {
+			if (ax>PAD_DEADZONE) {
 				pad |= HAT_RIGHT;
 				pad &= ~HAT_LEFT;
 			}
-			else if (ax<-DEADZONE) {
+			else if (ax<-PAD_DEADZONE) {
 				pad |= HAT_LEFT;
 				pad &= ~HAT_RIGHT;
 			}
@@ -1061,11 +1139,11 @@ static int Repeater_pollEvent(SDL_Event* event) {
 			}
 		}
 		if (ay!=ly) {
-			if (ay>DEADZONE) {
+			if (ay>PAD_DEADZONE) {
 				pad |= HAT_DOWN;
 				pad &= ~HAT_UP;
 			}
-			else if (ay<-DEADZONE) {
+			else if (ay<-PAD_DEADZONE) {
 				pad |= HAT_UP;
 				pad &= ~HAT_DOWN;
 			}
@@ -1076,8 +1154,85 @@ static int Repeater_pollEvent(SDL_Event* event) {
 
 		if (pad!=last_pad) {
 			last_pad = pad;
-			Repeater_fakeHatEvent(event, pad);
+			Pad_fakeHatEvent(event, pad);
 		}
+	}
+	
+	uint32_t tick = SDL_GetTicks();
+	int pressed = 0;
+	PadButtonId id = PAD_ID_NONE;
+	
+	if (event->type==SDL_KEYDOWN || event->type==SDL_KEYUP) {
+		uint8_t scan = event->key.keysym.scancode;
+		pressed = event->type==SDL_KEYDOWN;
+		
+			 if (scan==SCAN_CLOSE)	id = PAD_ID_CLOSE;
+		else if (scan==SCAN_OPEN)	id = PAD_ID_OPEN;
+		else if (scan==SCAN_BACK)	id = PAD_ID_BACK;
+		else if (scan==SCAN_POWER)	id = PAD_ID_POWER;
+	}
+	else if (event->type==SDL_JOYBUTTONDOWN || event->type==SDL_JOYBUTTONUP) {
+		uint8_t joy = event->jbutton.button;
+		pressed = event->type==SDL_JOYBUTTONDOWN;
+			 if (joy==JOY_X)		id = PAD_ID_X;
+		else if (joy==JOY_B)		id = PAD_ID_B;
+		else if (joy==JOY_Y)		id = PAD_ID_Y;
+		else if (joy==JOY_A)		id = PAD_ID_A;
+		else if (joy==JOY_START)	id = PAD_ID_START;
+		else if (joy==JOY_SELECT)	id = PAD_ID_SELECT;
+		else if (joy==JOY_MENU)		id = PAD_ID_MENU;
+		else if (joy==JOY_L1)		id = PAD_ID_L1;
+		else if (joy==JOY_R1)		id = PAD_ID_R1;
+		else if (joy==JOY_L2)		id = PAD_ID_L2;
+		else if (joy==JOY_R2)		id = PAD_ID_R2;
+		else if (joy==JOY_L3)		id = PAD_ID_L3;
+		else if (joy==JOY_R3)		id = PAD_ID_R3;
+		else if (joy==JOY_PLUS)		id = PAD_ID_PLUS;
+		else if (joy==JOY_MINUS)	id = PAD_ID_MINUS;
+	}
+	else if (event->type==SDL_JOYHATMOTION) {
+		int hat = event->jhat.value;
+		uint32_t dpad = PAD_NONE;
+		if (hat & SDL_HAT_UP)		dpad |= PAD_UP;
+		if (hat & SDL_HAT_DOWN)		dpad |= PAD_DOWN;
+		if (hat & SDL_HAT_LEFT)		dpad |= PAD_LEFT;
+		if (hat & SDL_HAT_RIGHT)	dpad |= PAD_RIGHT;
+
+		for (id=PAD_ID_UP; id<=PAD_ID_RIGHT; id++) {
+			uint32_t mask = 1u << id;
+
+			uint32_t was_pressed = pad.is_pressed & mask;
+			uint32_t is_pressed  = dpad & mask;
+
+			if (!is_pressed && was_pressed) {
+				pad.is_pressed		&= ~mask; // unset
+				pad.just_repeated	&= ~mask; // unset
+				pad.just_released	|= mask;  // set
+			}
+			else if (is_pressed && !was_pressed) {
+				pad.just_pressed	|= mask; // set
+				pad.just_repeated	|= mask; // set
+				pad.is_pressed		|= mask; // set
+				pad.repeat_at[id]	= tick + PAD_REPEAT_TIMEOUT;
+			}
+		}
+		
+		return result;
+	}
+	
+	if (id==PAD_ID_NONE) return result;
+	
+	uint32_t mask = 1u << id;
+	if (!pressed) {
+		pad.is_pressed		&= ~mask; // unset
+		pad.just_repeated	&= ~mask; // unset
+		pad.just_released	|= mask;  // set
+	}
+	else if ((pad.is_pressed & mask)==PAD_NONE) {
+		pad.just_pressed	|= mask; // set
+		pad.just_repeated	|= mask; // set
+		pad.is_pressed		|= mask; // set
+		pad.repeat_at[id]	= tick + PAD_REPEAT_TIMEOUT;
 	}
 	
 	return result;
@@ -1148,6 +1303,8 @@ static void Device_sleep(void) {
 	Settings_setBrightness(settings.brightness);
 	Settings_setVolume(settings.volume);
 	raw_led(0);
+
+	Pad_reset();
 }
 static void Device_poweroff(void) {
 	App_bye();
@@ -1173,107 +1330,109 @@ static void Device_tick(void) {
 	if (power_at && SDL_GetTicks()-power_at>=POWER_TIMEOUT) {
 		Device_poweroff();
 	}
+	
+	// same for our repeating volume buttons
+	if (Pad_justRepeated(PAD_PLUS)) {
+		if (Pad_isPressed(PAD_MENU)) {
+			if (settings.brightness<10) {
+				Settings_setBrightness(settings.brightness+1);
+			}
+			app.osd = OSD_BRIGHTNESS;
+		}
+		else {
+			if (settings.volume<20) {
+				Settings_setVolume(settings.volume+1);
+			}
+			app.osd = OSD_VOLUME;
+		}
+		osd_at = SDL_GetTicks();
+	}
+	else if (Pad_justRepeated(PAD_MINUS)) {
+		if (Pad_isPressed(PAD_MENU)) {
+			if (settings.brightness>0) {
+				Settings_setBrightness(settings.brightness-1);
+			}
+			app.osd = OSD_BRIGHTNESS;
+		}
+		else {
+			if (settings.volume>0) {
+				Settings_setVolume(settings.volume-1);
+			}
+			app.osd = OSD_VOLUME;
+		}
+		osd_at = SDL_GetTicks();
+	}
+	
+	Pad_nextFrame();
 }
 static int Device_handleEvent(SDL_Event* event) {
-	if (event->type==SDL_KEYDOWN) {
-		if (event->key.keysym.scancode==SCAN_CLOSE) {
-			Device_sleep();
-			return 1;
-		}
-		else if (event->key.keysym.scancode==SCAN_POWER && event->key.repeat==0) {
-			power_at = SDL_GetTicks();
-			return 1;
-		}
+	if (Pad_justPressed(PAD_CLOSE)) {
+		Device_sleep();
+		return 1;
 	}
-	else if (event->type==SDL_KEYUP) {
-		if (event->key.keysym.scancode==SCAN_POWER) {
-			power_at = 0;
-			Device_sleep();
+	if (Pad_justPressed(PAD_POWER)) {
+		power_at = SDL_GetTicks();
+		return 1;
+	}
+	else if (Pad_justReleased(PAD_POWER)) {
+		power_at = 0;
+		Device_sleep();
+		return 1;
+	}
+	
+	static int menu_combo = 0;
+	if (Pad_justPressed(PAD_MENU)) {
+		menu_combo = 0;
+	}
+	
+	if (Pad_isPressed(PAD_MENU)) {
+		if (Pad_justPressed(PAD_L2)) {
+			Pad_consume(PAD_L2);
+			settings.scale = (settings.scale + 1) % SCALE_COUNT;
+			App_sync(1);
+			menu_combo = 1;
+			return 1;
+		}
+		else if (Pad_justPressed(PAD_R2)) {
+			Pad_consume(PAD_R2);
+			settings.shader = (settings.shader + 1) % SHADER_COUNT;
+			App_sync(1);
+			menu_combo = 1;
+			return 1;
+		}
+
+		if (Pad_justPressed(PAD_START)) {
+			Pad_consume(PAD_START);
+			app.capture = 1;
+			menu_combo = 1;
 			return 1;
 		}
 	}
 	
-	static int menu_down = 0;
-	static int menu_combo = 0;
-
-	if (event->type==SDL_JOYBUTTONDOWN) {
-		if (event->jbutton.button==JOY_MENU) {
-			SDL_Log("menu down");
-			menu_down = 1;
-			menu_combo = 0;
-		}
-		
-		if (event->jbutton.button==JOY_START) {
-			if (menu_down) {
-				app.capture = 1;
+	// NOTE: moved Pad_justRepeated() to Device_tick()
+	// otherwise they only fire on press and not on repeat
+	// because Device_handleEvent() is only called when
+	// SDL fires an event
+	if (Pad_justPressed(PAD_PLUS)) {
+		if (Pad_isPressed(PAD_MENU)) {
+			if (settings.brightness<10) {
 				menu_combo = 1;
-				return 1;
 			}
 		}
-		
-		if (event->jbutton.button==JOY_L2) {
-			if (menu_down) {
-				settings.scale = (settings.scale + 1) % SCALE_COUNT;
-				App_sync(1);
-				menu_combo = 1;
-				return 1;
-			}
-		}
-		else if (event->jbutton.button==JOY_R2) {
-			if (menu_down) {
-				settings.shader = (settings.shader + 1) % SHADER_COUNT;
-				App_sync(1);
-				menu_combo = 1;
-				return 1;
-			}
-		}
-		
-		if (event->jbutton.button==JOY_PLUS) {
-			if (menu_down) {
-				if (settings.brightness<10) {
-					SDL_Log("increase brightness");
-					Settings_setBrightness(settings.brightness+1);
-					menu_combo = 1;
-				}
-				app.osd = OSD_BRIGHTNESS;
-			}
-			else {
-				if (settings.volume<20) {
-					SDL_Log("increase volume");
-					Settings_setVolume(settings.volume+1);
-				}
-				app.osd = OSD_VOLUME;
-			}
-			osd_at = SDL_GetTicks();
-			return 1;
-		}
-		else if (event->jbutton.button==JOY_MINUS) {
-			if (menu_down) {
-				if (settings.brightness>0) {
-					SDL_Log("decrease brightness");
-					Settings_setBrightness(settings.brightness-1);
-					menu_combo = 1;
-				}
-				app.osd = OSD_BRIGHTNESS;
-			}
-			else {
-				if (settings.volume>0) {
-					SDL_Log("decrease volume");
-					Settings_setVolume(settings.volume-1);
-				}
-				app.osd = OSD_VOLUME;
-				
-			}
-			osd_at = SDL_GetTicks();
-			return 1;
-		}
+		return 1;
 	}
-	else if (event->type==SDL_JOYBUTTONUP) {
-		if (event->jbutton.button==JOY_MENU) {
-			SDL_Log("released menu, combo: %i", menu_combo);
-			menu_down = 0;
-			return menu_combo;
+	else if (Pad_justPressed(PAD_MINUS)) {
+		if (Pad_isPressed(PAD_MENU)) {
+			if (settings.brightness>0) {
+				menu_combo = 1;
+			}
 		}
+		return 1;
+	}
+	
+	if (Pad_justReleased(PAD_MENU)) {
+		if (menu_combo) Pad_consume(PAD_MENU);
+		return menu_combo;
 	}
 	
 	return 0;
@@ -1938,19 +2097,16 @@ static void App_bootlogo(void) {
 	};
 	
 	while (bootlogo) {
-		while (bootlogo && Repeater_pollEvent(&event)) {
-			int btn = event.jbutton.button;
+		while (bootlogo && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
 				dirty = 1;
 				continue;
 			}
-			
-			if (event.type==SDL_JOYBUTTONDOWN) {
-				if (btn==JOY_SELECT) {
-					bootlogo = 0;
-					break;
-				}
-			}
+		}
+		
+		if (Pad_justPressed(PAD_B)) {
+			bootlogo = 0;
+			break;
 		}
 		
 		if (dirty) {
@@ -2024,7 +2180,12 @@ static void App_bootlogo(void) {
 		else {
 			real_SDL_Delay(16);
 		}
+		
+		Device_tick();
 	}
+}
+static void App_datetime(void) {
+	
 }
 
 static void App_extra(void) {
@@ -2081,6 +2242,8 @@ static void App_menu(void) {
 		"ARCHIVE",
 	};
 	
+	Pad_reset();
+
 	int menu_at = SDL_GetTicks();
 	int selected = 0;
 	int dirty = 1;
@@ -2098,161 +2261,162 @@ static void App_menu(void) {
 			dirty = 1;
 		}
 		
-		while (in_menu && Repeater_pollEvent(&event)) {
-			int btn = event.jbutton.button;
-			
+		while (in_menu && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
 				dirty = 1;
 				continue;
 			}
-			
-			if (event.type==SDL_JOYHATMOTION) {
-				int hat = event.jhat.value;
-				if (hat & HAT_NEUTRAL) continue;
-				
+		}
+		
+		if (Pad_justReleased(PAD_MENU)) {
+			in_menu = 0;
+		}
+		
+		if (Pad_anyPressed()) {
+			menu_at = SDL_GetTicks(); // keep awake
+		}
+		
+		if (mode==MODE_MENU) {
+			if (Pad_justPressed(PAD_UP)) {
+				selected -= 1;
 				dirty = 1;
-				
-				if (mode==MODE_MENU) {
-					if (hat & HAT_UP) {
-						selected -= 1;
-					}
-					else if (hat & HAT_DOWN) {
-						selected += 1;
-					}
-				
-					if (hat & HAT_RIGHT) {
-						selected = 0;
-						current = App_next(current, +1);
-					}
-					else if (hat & HAT_LEFT) {
-						selected = 0;
-						current = App_next(current, -1);
-					}
-				}
-				else if (mode==MODE_ARCHIVE) {
-					if (hat & HAT_UP) { // ROW UP
-						current -= 1;
-						if (current<0) current += app.count;
-					}
-					else if (hat & HAT_DOWN) { // ROW DOWN
-						current += 1;
-						if (current>=app.count) current -= app.count;
-					}
-					
-					if (hat & HAT_RIGHT) { // PAGE FORWARD
-						if (current==app.count-1) current = 0;
-						else {
-							current += rows;
-							if (current>=app.count) current = app.count-1;
-						}
-					}
-					else if (hat & HAT_LEFT) { // PAGE BACK
-						if (current==0) current = app.count-1;
-						else {
-							current -= rows;
-							if (current<0) current = 0;
-						}
-					}
-				}
 			}
-			else if (event.type==SDL_JOYBUTTONDOWN) {
-				menu_at = SDL_GetTicks();
-				
-				if (mode==MODE_MENU) {
-					if (btn==JOY_SELECT) {
-						// TODO: tmp
-						App_bootlogo();
-						dirty = 1;
-					}
-					
-					if (btn==JOY_B) { // BACK
-						if (current!=app.current) {
-							current = app.current;
-							selected = 0;
-							dirty = 1;
-						}
-						else {
-							in_menu = 0;
-						}
-					}
-					else if (btn==JOY_A) { // SELECT
-						if (current==app.current) {
-							if (selected==0) { // SAVE
-								App_save();
-							}
-							else if (selected==1) { // LOAD
-								App_load();
-							}
-							else if (selected==2) { // ARCHIVE
-								mode = MODE_ARCHIVE;
-								selected = current;
-								dirty = 1;
-							}
-							else if (selected==3) { // RESET
-								App_reset();
-							}
-							if (mode==MODE_MENU) in_menu = 0;
-						}
-						else {
-							if (selected==0) { // LOAD
-								App_save();
-								App_set(current);
-								Settings_save();
-							
-								drastic_audio_pause(0);
-								puts("[LOAD] resume requested");
-								loader.state = LOADER_REQUESTED;
-								loader.after = LOADER_RESUME;
-							
-								in_menu = 0;
-							}
-							else if (selected==1) { // ARCHIVE
-								mode = MODE_ARCHIVE;
-								selected = current;
-								dirty = 1;
-							}
-						}
-					}
-				}
-				else if (mode==MODE_ARCHIVE) {
-					if (btn==JOY_A) { // TOGGLE
-						Entry* item = &app.items[current];
-						
-						char shown[MAX_FILE];
-						sprintf(shown, "%s/%s", GAMES_PATH, item->name);
-						char hidden[MAX_FILE];
-						sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
-						
-						char *dst,*src;
-						if (item->hidden) {
-							src = hidden;
-							dst = shown;
-						}
-						else {
-							src = shown;
-							dst = hidden;
-						}
-						
-						if (!exists(dst) && rename(src, dst)==0) {
-							item->hidden = !item->hidden;
-							dirty = 1;
-						}
-					}
-					if (btn==JOY_B) { // BACK
-						mode = MODE_MENU;
-						dirty = 1;
-						// reusing unused selected to store current
-						// upon entering archive so we can restore
-						// when existing, selected will always
-						// revert to ARCHIVE
-						current = selected;
-						selected = current==app.current ? 2 : 1;
-					}
-				}
+			else if (Pad_justPressed(PAD_DOWN)) {
+				selected += 1;
+				dirty = 1;
 			}
-			else if (event.type==SDL_JOYBUTTONUP) {
-				if (btn==JOY_MENU) {
+			
+			if (Pad_justPressed(PAD_RIGHT)) {
+				selected = 0;
+				current = App_next(current, +1);
+				dirty = 1;
+			}
+			else if (Pad_justPressed(PAD_LEFT)) {
+				selected = 0;
+				current = App_next(current, -1);
+				dirty = 1;
+			}
+			
+			if (Pad_justPressed(PAD_SELECT)) {
+				App_datetime();
+				dirty = 1;
+			}
+			if (Pad_justPressed(PAD_START)) {
+				// TODO: tmp
+				App_bootlogo();
+				dirty = 1;
+			}
+			
+			if (Pad_justPressed(PAD_B)) {
+				if (current!=app.current) {
+					current = app.current;
+					selected = 0;
+					dirty = 1;
+				}
+				else {
 					in_menu = 0;
+				}
+			}
+			if (Pad_justPressed(PAD_A)) {
+				if (current==app.current) {
+					if (selected==0) { // SAVE
+						App_save();
+					}
+					else if (selected==1) { // LOAD
+						App_load();
+					}
+					else if (selected==2) { // ARCHIVE
+						mode = MODE_ARCHIVE;
+						selected = current;
+						dirty = 1;
+					}
+					else if (selected==3) { // RESET
+						App_reset();
+					}
+					if (mode==MODE_MENU) in_menu = 0;
+				}
+				else {
+					if (selected==0) { // LOAD
+						App_save();
+						App_set(current);
+						Settings_save();
+					
+						drastic_audio_pause(0);
+						puts("[LOAD] resume requested");
+						loader.state = LOADER_REQUESTED;
+						loader.after = LOADER_RESUME;
+					
+						in_menu = 0;
+					}
+					else if (selected==1) { // ARCHIVE
+						mode = MODE_ARCHIVE;
+						selected = current;
+						dirty = 1;
+					}
+				}
+			}
+		}
+		else if (mode==MODE_ARCHIVE) {
+			if (Pad_justRepeated(PAD_UP)) {
+				current -= 1;
+				if (current<0) current += app.count;
+				dirty = 1;
+			}
+			else if (Pad_justRepeated(PAD_DOWN)) {
+				current += 1;
+				if (current>=app.count) current -= app.count;
+				dirty = 1;
+			}
+			
+			if (Pad_justPressed(PAD_RIGHT)) {
+				if (current==app.count-1) current = 0;
+				else {
+					current += rows;
+					if (current>=app.count) current = app.count-1;
+				}
+				dirty = 1;
+			}
+			else if (Pad_justPressed(PAD_LEFT)) {
+				if (current==0) current = app.count-1;
+				else {
+					current -= rows;
+					if (current<0) current = 0;
+				}
+				dirty = 1;
+			}
+			
+			if (Pad_justPressed(PAD_B)) {
+				mode = MODE_MENU;
+				dirty = 1;
+				// reusing unused selected to store current
+				// upon entering archive so we can restore
+				// when existing, selected will always
+				// revert to ARCHIVE
+				current = selected;
+				selected = current==app.current ? 2 : 1;
+			}
+			
+			if (Pad_justPressed(PAD_A)) {
+				Entry* item = &app.items[current];
+				
+				char shown[MAX_FILE];
+				sprintf(shown, "%s/%s", GAMES_PATH, item->name);
+				char hidden[MAX_FILE];
+				sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
+				
+				char *dst,*src;
+				if (item->hidden) {
+					src = hidden;
+					dst = shown;
+				}
+				else {
+					src = shown;
+					dst = hidden;
+				}
+				
+				if (!exists(dst) && rename(src, dst)==0) {
+					item->hidden = !item->hidden;
+					dirty = 1;
 				}
 			}
 		}
@@ -2448,6 +2612,8 @@ static void App_menu(void) {
 		Device_tick(); // required for power off
 	}
 	
+	Pad_reset();
+		
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (!app.fast_forward && loader.state==LOADER_IDLE) Device_mute(0);
 	app.menu = 0;
@@ -2616,26 +2782,22 @@ void SDL_DestroyTexture(SDL_Texture *texture) {
 
 int SDL_PollEvent(SDL_Event* event) {
 	while (1) {
-		int result = Repeater_pollEvent(event);
+		int result = Pad_pollEvent(event);
 		if (!result) return result;
 		
 		if (Device_handleEvent(event)) continue;
 		
-		if (event->type==SDL_JOYBUTTONUP) {
-			if (event->jbutton.button==JOY_MENU) {
-				App_menu();
-				continue;
-			}
+		if (Pad_justReleased(PAD_MENU)) {
+			App_menu();
+			continue;
+		}
+
+		if (Pad_justPressed(PAD_BACK)) {
+			app.fast_forward = !app.fast_forward;
+			if (app.fast_forward) Device_mute(1);
+			else Device_mute(0);
 		}
 		
-		if (event->type==SDL_KEYDOWN) {
-			if (event->key.keysym.scancode==SCAN_BACK) {
-				app.fast_forward = !app.fast_forward;
-				if (app.fast_forward) Device_mute(1);
-				else Device_mute(0);
-			}
-		}
-	
 		// LOG_event(event);
 		switch (event->type) {
 			case SDL_FINGERDOWN:

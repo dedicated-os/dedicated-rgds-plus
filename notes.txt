@@ -1,6 +1,16 @@
+Pad_* implementation
+	anywhere I call XGL_RenderPresent() at the end of the frame 
+	I must call Pad_nextFrame() to setup Pad for the next frame
+		tucked into Device_tick()
+	Repeater_* becomes Pad_*
+		I no longer send repeat PLUS MINUS events
+		I do continue sending fake hat events for the analog stick
+		any Pad_justRepeated() must be used outside Pad_pollEvent() loops
+
 clock
 	really need to implement PAD_justRepeated for this (and ARCHIVE)
-	then backport to zero40
+	then backport to zero40 :grimacing:
+		this was a hairy change, not loving that prospect
 
 is this done?
 	
