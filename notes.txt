@@ -1,4 +1,20 @@
+clock
+	really need to implement PAD_justRepeated for this (and ARCHIVE)
+	then backport to zero40
+
 is this done?
+	
+	open up the main menu and make them touch targets
+		touch top screen to open/close menu
+			not possible
+		tapping an unselected option selects it
+		tapping a selected option is like pressing A
+		nope, not getting any touch events from the top screen...
+			which is weird. I could have sworn it had two touch screens
+			even though that's unnecessary for DS
+			it is, there's some screen switching shenanigans apparently
+			might be some stock daemon not running under dedos?
+
 is release setup?
 
 opening lid sometimes doesn't wake from sleep

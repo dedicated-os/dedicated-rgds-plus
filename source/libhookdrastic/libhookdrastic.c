@@ -1876,7 +1876,6 @@ static void App_init(void) {
 	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
 	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
 		
-
 	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
 
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
