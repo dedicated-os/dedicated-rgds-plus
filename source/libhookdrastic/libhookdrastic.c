@@ -2199,6 +2199,7 @@ typedef struct {
 	int hour;
 	int minute;
 	int second;
+	int ampm;
 } DateTime;
 
 static DateTime DateTime_get(void) {
@@ -2211,6 +2212,7 @@ static DateTime DateTime_get(void) {
 		.hour = tm.tm_hour,
 		.minute = tm.tm_min,
 		.second = tm.tm_sec,
+		.ampm = tm.tm_hour >= 12,
 	};
 }
 static void DateTime_set(DateTime *dt) {
@@ -2233,8 +2235,18 @@ static int days_in_month(int year, int month) {
 
 	return days[month - 1];
 }
+
 // --------------------------------------------
 
+enum {
+	FIELD_YEAR = 0,
+	FIELD_MONTH,
+	FIELD_DAY,
+	FIELD_HOUR,
+	FIELD_MINUTE,
+	// FIELD_SECOND,
+	FIELD_AMPM,
+};
 
 static void App_datetime(void) {
 	int datetime = 1;
@@ -2243,39 +2255,46 @@ static void App_datetime(void) {
 	
 	DateTime dt = DateTime_get();
 	int columns[] = {
-		dt.year / 1000 % 10,
-		dt.year / 100 % 10,
-		dt.year / 10 % 10,
-		dt.year / 1 % 10,
-		-'/',
-		dt.month / 10 % 10,
-		dt.month / 1 % 10,
-		-'/',
-		dt.day / 10 % 10,
-		dt.day / 1 % 10,
-		-' ',
-		dt.hour / 10 % 10,
-		dt.hour / 1 % 10,
-		-':',
-		dt.minute / 10 % 10,
-		dt.minute / 1 % 10,
-		-':',
-		dt.second / 10 % 10,
-		dt.second / 1 % 10,
+		dt.year,
+		dt.month,
+		dt.day,
+		dt.hour,
+		dt.minute,
+		// dt.second,
+		dt.ampm,
+	};
+	char separators[] = {
+		'/',
+		'/',
+		' ',
+		':',
+		// ':',
+		0,
+		0,
 	};
 	int count = NUMBER_OF(columns);
 	
 	int w = 8;
 	for (int i=0; i<count; i++) {
-		if (columns[i]==-':') w += 4;
-		else w += 20;
+		// column
+		if (i==FIELD_YEAR) w += 20 * 4 + 4 * 3;
+		else w += 20 * 2 + 4 * 1;
+		w += 8;
+		
+		// separator
+		if (i==FIELD_AMPM) break;
+		
+		int sep = separators[i];
+			 if (sep==':') w += 4;
+		else if (sep==' ') w += 12;
+		else if (sep=='/') w += 20;
 		w += 8;
 	}
 	int h = 8 + 20 + 8;
 	int x = (SCREEN_WIDTH - w) / 2;
 	int y = (SCREEN_HEIGHT - h) / 2;
 	
-	int selected = 0;
+	int selected = FIELD_DAY;
 	while (datetime) {
 		while (datetime && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
@@ -2293,42 +2312,35 @@ static void App_datetime(void) {
 			dirty = 1;
 			selected -= 1;
 			if (selected<0) selected += count;
-			while (columns[selected]<0) selected -= 1;
 		}
 		else if (Pad_justRepeated(PAD_RIGHT)) {
 			dirty = 1;
 			selected += 1;
 			if (selected>=count) selected -= count;
-			while (columns[selected]<0) selected += 1;
 		}
 		
 		int validate = 0;
 		if (Pad_justRepeated(PAD_UP)) {
 			dirty = 1;
 			columns[selected] += 1;
-			// int value = columns[selected];
-			// value += 1;
-			// if (value>=10) value -= 10;
-			// columns[selected] = value;
+			if (selected==FIELD_AMPM) columns[FIELD_HOUR] += 12;
 			validate = 1;
 		}
 		else if (Pad_justRepeated(PAD_DOWN)) {
 			dirty = 1;
 			columns[selected] -= 1;
-			// int value = columns[selected];
-			// value -= 1;
-			// if (value<0) value += 10;
-			// columns[selected] = value;
+			if (selected==FIELD_AMPM) columns[FIELD_HOUR] -= 12;
 			validate = 1;
 		}
 		
 		if (validate) {
-			int year = columns[0] * 1000 + columns[1] * 100 + columns[2] * 10 + columns[3];
-			int month = columns[5] * 10 + columns[6];
-			int day = columns[8] * 10 + columns[9];
-			int hour = columns[11] * 10 + columns[12];
-			int minute = columns[14] * 10 + columns[15];
-			int second = columns[17] * 10 + columns[18];
+			int year	= columns[FIELD_YEAR];
+			int month	= columns[FIELD_MONTH];
+			int day		= columns[FIELD_DAY];
+			int hour	= columns[FIELD_HOUR];
+			int minute	= columns[FIELD_MINUTE];
+			// int second	= columns[FIELD_SECOND];
+			int ampm	= columns[FIELD_AMPM];
 			
 			if (year < 1970) year = 1970;
 			else if (year > 2100) year = 2100;
@@ -2341,41 +2353,32 @@ static void App_datetime(void) {
 			if (day < 1) day = max_day;
 			else if (day > max_day) day = 1;
 
-			if (hour < 0) hour = 23;
-			else if (hour > 23) hour = 0;
+			if (hour < 0) hour += 24;
+			else if (hour >= 24) hour -= 24;
+			
+			ampm = hour >= 12;
 
 			if (minute < 0) minute = 59;
 			else if (minute > 59) minute = 0;
 
-			if (second < 0) second = 59;
-			else if (second > 59) second = 0;
+			// if (second < 0) second = 59;
+			// else if (second > 59) second = 0;
 			
-			columns[0] = year / 1000 % 10;
-			columns[1] = year / 100 % 10;
-			columns[2] = year / 10 % 10;
-			columns[3] = year / 1 % 10;
+			columns[FIELD_YEAR]		= year;
+			columns[FIELD_MONTH]	= month;
+			columns[FIELD_DAY]		= day;
+			columns[FIELD_HOUR]		= hour;
+			columns[FIELD_MINUTE]	= minute;
+			// columns[FIELD_SECOND]	= second;
+			columns[FIELD_AMPM]		= ampm;
 
-			columns[5] = month / 10 % 10;
-			columns[6] = month / 1 % 10;
-			
-			columns[8] = day / 10 % 10;
-			columns[9] = day / 1 % 10;
-			
-			columns[11] = hour / 10 % 10;
-			columns[12] = hour / 1 % 10;
-
-			columns[14] = minute / 10 % 10;
-			columns[15] = minute / 1 % 10;
-			
-			columns[17] = second / 10 % 10;
-			columns[18] = second / 1 % 10;
-			
 			dt.year = year;
 			dt.month = month;
 			dt.day = day;
 			dt.hour = hour;
 			dt.minute = minute;
-			dt.second = second;
+			// dt.second = second;
+			dt.ampm = ampm;
 		}
 		
 		if (Pad_justPressed(PAD_A)) {
@@ -2411,29 +2414,52 @@ static void App_datetime(void) {
 			for (int j=0; j<count; j++) {
 				Font_renderFunc font_renderer = Font_shadowText;
 				SDL_Color color = WHITE_COLOR;
-	
+				
 				if (j==selected) {
-					AA_rect(renderer, ox-2,oy-2, 28,28, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
-					AA_rect(renderer, ox-4,oy-4, 28,28, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
+					int ow = 20 * 2 + 4 * 1;
+					if (j==FIELD_YEAR) ow = 20 * 4 + 4 * 3;
+					ow += 8;
+					AA_rect(renderer, ox-2,oy-2, ow,28, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
+					AA_rect(renderer, ox-4,oy-4, ow,28, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
 					font_renderer = Font_renderText;
 					color = DARK_COLOR;
 				}
-	
+				
+				char *format = "%02i";
+				if (j==FIELD_YEAR) format = "%04i";
+				
 				int value = columns[j];
-				char c[2];
-				if (value<0) {
-					sprintf(c, "%c", -value);
-					Font_shadowText(renderer, font24, c, ox,oy, WHITE_COLOR);
+				if (j==FIELD_HOUR) {
+					if (value==0) value = 12;
+					if (value>12) value -= 12;
 				}
-				else {
-					sprintf(c, "%i", value);
+				
+				char tmp[8];
+				if (j==FIELD_AMPM) sprintf(tmp, "%s", value ? "PM" : "AM");
+				else sprintf(tmp, format, value);
+				
+				int len = strlen(tmp);
+				for (int k=0; k<len; k++) {
+					char c[2];
+					sprintf(c, "%c", tmp[k]);
 					int ow;
 					Font_getTextSize(font24, c, &ow, NULL);
 					font_renderer(renderer, font24, c, ox+(20-ow)/2,oy, color);
+					ox += 20;
+					ox += 4;
 				}
 				
-				if (value==-':') ox += 4;
-				else ox += 20;
+				if (j==FIELD_AMPM) break;
+				
+				ox += 4;
+				value = separators[j];
+				if (value) {
+					sprintf(tmp, "%c", value);
+					Font_shadowText(renderer, font24, tmp, ox,oy, WHITE_COLOR);
+				}
+					 if (value==':') ox += 4;
+				else if (value==' ') ox += 12;
+				else if (value=='/') ox += 20;
 				ox += 8;
 			}
 			
