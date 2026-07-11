@@ -124,7 +124,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define SCAN_CLOSE	73
 #define SCAN_OPEN	76
 
-#define SCAN_BACK	270
+#define SCAN_BACK	14
 #define SCAN_POWER	102
 
 // --------------------------------------------
@@ -1169,7 +1169,6 @@ static int Pad_pollEvent(SDL_Event* event) {
 	if (event->type==SDL_KEYDOWN || event->type==SDL_KEYUP) {
 		uint8_t scan = event->key.keysym.scancode;
 		pressed = event->type==SDL_KEYDOWN;
-		
 			 if (scan==SCAN_CLOSE)	id = PAD_ID_CLOSE;
 		else if (scan==SCAN_OPEN)	id = PAD_ID_OPEN;
 		else if (scan==SCAN_BACK)	id = PAD_ID_BACK;

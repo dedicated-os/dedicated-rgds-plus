@@ -1,29 +1,10 @@
-Pad_* implementation
-	anywhere I call XGL_RenderPresent() at the end of the frame 
-	I must call Pad_nextFrame() to setup Pad for the next frame
-		tucked into Device_tick()
-	Repeater_* becomes Pad_*
-		I no longer send repeat PLUS MINUS events
-		I do continue sending fake hat events for the analog stick
-		any Pad_justRepeated() must be used outside Pad_pollEvent() loops
-
 clock
-	really need to implement PAD_justRepeated for this (and ARCHIVE)
 	then backport to zero40 :grimacing:
 		this was a hairy change, not loving that prospect
 
 is this done?
-	
-	open up the main menu and make them touch targets
-		touch top screen to open/close menu
-			not possible
-		tapping an unselected option selects it
-		tapping a selected option is like pressing A
-		nope, not getting any touch events from the top screen...
-			which is weird. I could have sworn it had two touch screens
-			even though that's unnecessary for DS
-			it is, there's some screen switching shenanigans apparently
-			might be some stock daemon not running under dedos?
+	empty screen?
+	goodbye screen?
 
 is release setup?
 
