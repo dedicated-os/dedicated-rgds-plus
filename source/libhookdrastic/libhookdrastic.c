@@ -11,6 +11,9 @@
 #include <linux/input.h>
 #include <alsa/asoundlib.h>
 
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
@@ -257,6 +260,14 @@ static struct {
 	int bri1;
 	int led0;
 	int led1;
+
+	int drm;
+	struct {
+		uint32_t connector;
+		uint32_t dpms;
+	} dsi[SCREEN_COUNT];
+	int dsi_count;
+	
 	snd_mixer_t *mix;
 	snd_mixer_elem_t *dac;
 } raw;
@@ -265,6 +276,51 @@ static void raw_init(void) {
 	raw.bri1 = open("/sys/class/backlight/backlight/brightness", O_WRONLY | O_CLOEXEC);
 	raw.led0 = open("/sys/class/anbernic_misc/lowpwr_led", O_WRONLY | O_CLOEXEC);
 	raw.led1 = open("/sys/class/anbernic_misc/work_led", O_WRONLY | O_CLOEXEC);
+	
+	// I hate drm code
+	raw.drm = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+	raw.dsi_count = 0;
+	if (raw.drm >= 0) {
+		drmModeRes *res = drmModeGetResources(raw.drm);
+		if (res) {
+			for (int i=0; i<res->count_connectors && raw.dsi_count<SCREEN_COUNT; i++) {
+				drmModeConnector *conn = drmModeGetConnector(raw.drm, res->connectors[i]);
+				if (!conn) continue;
+
+				if (conn->connection==DRM_MODE_CONNECTED &&
+					conn->connector_type==DRM_MODE_CONNECTOR_DSI) {
+					drmModeObjectProperties *props = drmModeObjectGetProperties(
+						raw.drm,
+						conn->connector_id,
+						DRM_MODE_OBJECT_CONNECTOR
+					);
+
+					if (props) {
+						for (uint32_t j=0; j<props->count_props; j++) {
+							drmModePropertyRes *prop = drmModeGetProperty(raw.drm, props->props[j]);
+							if (!prop) continue;
+
+							if (strcmp(prop->name, "DPMS")==0) {
+								int index = raw.dsi_count++;
+								raw.dsi[index].connector = conn->connector_id;
+								raw.dsi[index].dpms = prop->prop_id;
+								drmModeFreeProperty(prop);
+								break;
+							}
+
+							drmModeFreeProperty(prop);
+						}
+
+						drmModeFreeObjectProperties(props);
+					}
+				}
+
+				drmModeFreeConnector(conn);
+			}
+
+			drmModeFreeResources(res);
+		}
+	}
 	
 	// I hate audio code
 	snd_mixer_open(&raw.mix, 0);
@@ -283,6 +339,7 @@ static void raw_quit(void) {
 	close(raw.bri1);
 	close(raw.led0);
 	close(raw.led1);
+	close(raw.drm);
 	snd_mixer_close(raw.mix);
 }
 
@@ -300,6 +357,19 @@ static void raw_led(int enable) {
 	// if (enable) unlink(SUPPRESS_PATH);
 	// else touch(SUPPRESS_PATH);
 	// #undef SUPPRESS_PATH
+}
+
+static void raw_scr(int enable) {
+	uint64_t dpms = enable ? DRM_MODE_DPMS_ON : DRM_MODE_DPMS_OFF;
+	for (int i=0; i<raw.dsi_count; i++) {
+		drmModeObjectSetProperty(
+			raw.drm,
+			raw.dsi[i].connector,
+			DRM_MODE_OBJECT_CONNECTOR,
+			raw.dsi[i].dpms,
+			dpms
+		);
+	}
 }
 
 // --------------------------------------------
@@ -1264,13 +1334,13 @@ static void Device_sleep(void) {
 	raw_vol(0);
 	raw_bri(0);
 	raw_led(1);
-	system("screen off");
-	
+	raw_scr(0);
+
 	Settings_save();
 	drastic_audio_pause(1);
 	
 	App_save();
-	drastic_await_save();
+	// drastic_await_save(); // not necessary, drastic_quit already calls this
 	
 	int was_closed = getInt(app.lid)==2;
 	
@@ -1313,10 +1383,10 @@ static void Device_sleep(void) {
 
 	drastic_audio_pause(0);
 	
-	system("screen on");
+	raw_scr(1);
+	raw_led(0);
 	Settings_setBrightness(settings.brightness);
 	Settings_setVolume(settings.volume);
-	raw_led(0);
 
 	Pad_reset();
 }
@@ -1330,7 +1400,7 @@ static void Device_poweroff(void) {
 	unlink("/tmp/exec_loop");
 	raw_bri(0);
 	raw_led(1);
-	system("screen off");
+	raw_scr(0);
 	drastic_quit();
 }
 #define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes

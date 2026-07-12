@@ -13,8 +13,7 @@ is release setup?
 	create and push main-rgds and dedicated-rgds
 
 opening lid sometimes doesn't wake from sleep
-	need to press power
-	or maybe I'm impatient
+	fixed?
 
 --
 

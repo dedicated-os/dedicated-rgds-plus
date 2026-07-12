@@ -15,7 +15,7 @@ all: build
 auth:
 	ssh $(REMOTE_DISK) exit
 build:
-	$(CROSS_COMPILE)gcc $(TARGET).c xgl.c -o $(TARGET).so -shared -lSDL2_image -lGLESv2 -fPIC
+	$(CROSS_COMPILE)gcc $(TARGET).c xgl.c -o $(TARGET).so -I/usr/include/libdrm -shared -lSDL2_image -lGLESv2 -ldrm -fPIC
 upload: build
 	$(SCP) "$(TARGET).so" "$(REMOTE_DISK):$(REMOTE_PATH)/$(TARGET).so"
 	$(SSH) "killall -s kill drastic"
