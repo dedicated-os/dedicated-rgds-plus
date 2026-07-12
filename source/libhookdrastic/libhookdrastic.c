@@ -2682,11 +2682,13 @@ static void App_menu(void) {
 			
 			if (Pad_justPressed(PAD_SELECT)) {
 				App_datetime();
+				menu_at = SDL_GetTicks(); // keep awake
 				dirty = 1;
 			}
 			if (Pad_justPressed(PAD_START)) {
 				// TODO: tmp
 				App_bootlogo();
+				menu_at = SDL_GetTicks(); // keep awake
 				dirty = 1;
 			}
 			

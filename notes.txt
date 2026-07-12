@@ -1,4 +1,6 @@
 datetime
+	if you stay in datetime too long as soon as you exit the device sleeps
+		probably something related to menu_at?
 	note should be light gray not white
 		but that will required a background to avoid contrast issues
 		maybe datetime just sits on a black screen like archive...
