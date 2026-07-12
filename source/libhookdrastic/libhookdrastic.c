@@ -2178,7 +2178,6 @@ static void App_bootlogo(void) {
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_RenderPresent(app.xgl.renderers[i]);
 			}
-			app.capture = 0;
 		}
 		else {
 			real_SDL_Delay(16);
@@ -2462,9 +2461,8 @@ static void App_datetime(void) {
 				ox += 8;
 			}
 			
-			if (app.capture) App_capture("clock");
+			if (app.capture) App_capture("menu");
 			XGL_RenderPresent(renderer);
-			app.capture = 0;
 		}
 		else {
 			real_SDL_Delay(16);
@@ -2881,7 +2879,6 @@ static void App_menu(void) {
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_RenderPresent(app.xgl.renderers[i]);
 			}
-			app.capture = 0;
 		}
 		else {
 			real_SDL_Delay(16);
@@ -3082,6 +3079,7 @@ int SDL_PollEvent(SDL_Event* event) {
 		}
 
 		if (Pad_justPressed(PAD_BACK)) {
+			Pad_consume(PAD_BACK);
 			app.fast_forward = !app.fast_forward;
 			if (app.fast_forward) Device_mute(1);
 			else Device_mute(0);

@@ -1,4 +1,11 @@
+bugs
+	hijacker did not erase the sd card
+	empty is not displaying when empty
+		is archive being counted?
+
 clock
+	add note to
+		Save in-game and Reset to apply
 	then backport to zero40 :grimacing:
 		this was a hairy change, not loving that prospect
 
