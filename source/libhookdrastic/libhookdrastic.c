@@ -1046,7 +1046,7 @@ void Fonts_quit(void) {
 }
 
 // --------------------------------------------
-// button repeater
+// input abstraction
 // --------------------------------------------
 
 #define PAD_REPEAT_TIMEOUT	300
@@ -1407,7 +1407,8 @@ static void Device_poweroff(void) {
 #define WAKE_DEFER 250 // quarter of a second
 #define POWER_TIMEOUT 1000 // one second
 static int power_at = 0;
-static void Device_tick(void) {
+static int Device_tick(void) {
+	int dirty = 1;
 	// must be called outside of Device_handleEvent because
 	// the power key doesn't fire repeat events so otherwise
 	// nothing triggers this check
@@ -1430,6 +1431,7 @@ static void Device_tick(void) {
 			app.osd = OSD_VOLUME;
 		}
 		osd_at = SDL_GetTicks();
+		dirty = 1;
 	}
 	else if (Pad_justRepeated(PAD_MINUS)) {
 		if (Pad_isPressed(PAD_MENU)) {
@@ -1445,9 +1447,11 @@ static void Device_tick(void) {
 			app.osd = OSD_VOLUME;
 		}
 		osd_at = SDL_GetTicks();
+		dirty = 1;
 	}
 	
 	Pad_nextFrame();
+	return dirty;
 }
 static int Device_handleEvent(SDL_Event* event) {
 	if (Pad_justPressed(PAD_CLOSE)) {
@@ -2264,7 +2268,7 @@ static void App_bootlogo(void) {
 			real_SDL_Delay(16);
 		}
 		
-		Device_tick();
+		if (Device_tick()) dirty = 1;
 	}
 	Pad_reset();
 }
@@ -2314,8 +2318,6 @@ static int days_in_month(int year, int month) {
 
 	return days[month - 1];
 }
-
-// --------------------------------------------
 
 enum {
 	FIELD_YEAR = 0,
@@ -2486,7 +2488,6 @@ static void App_datetime(void) {
 			XGL_SetRenderShader(renderer, default_shader);
 			XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 			
-			// Font_shadowText(renderer, font24, formatted, 20,20, LIGHT_COLOR);
 			AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
 			int ox = x + 8;
 			int oy = y + 8;
@@ -2549,10 +2550,12 @@ static void App_datetime(void) {
 			real_SDL_Delay(16);
 		}
 		
-		Device_tick();
+		if (Device_tick()) dirty = 1;
 	}
 	Pad_reset();
 }
+
+// --------------------------------------------
 
 static void App_extra(void) {
 	SDL_Surface* tmp;
@@ -2965,8 +2968,7 @@ static void App_menu(void) {
 			real_SDL_Delay(16);
 		}
 		
-		// TODO: this needs to be in submenus too
-		// 
+		// TODO: this needs to be in submenus too?
 		#define MENU_TIMEOUT 30 * 1000 // thirty seconds
 		if (SDL_GetTicks()>=menu_at+MENU_TIMEOUT) {
 			if (!is_charging) {
@@ -2976,7 +2978,7 @@ static void App_menu(void) {
 			menu_at = SDL_GetTicks();
 		}
 
-		Device_tick(); // required for power off
+		if (Device_tick()) dirty = 1; // required for power off
 	}
 	
 	Pad_reset();
@@ -3153,6 +3155,10 @@ int SDL_PollEvent(SDL_Event* event) {
 		if (!result) return result;
 		
 		if (Device_handleEvent(event)) continue;
+		
+		if (Pad_justPressed(PAD_MENU)) {
+			continue;
+		}
 		
 		if (Pad_justReleased(PAD_MENU)) {
 			App_menu();

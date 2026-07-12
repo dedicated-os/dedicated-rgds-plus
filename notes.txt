@@ -1,11 +1,14 @@
-clock
+datetime
+	missing osd
+		because we don't re-render the top screen in datetime mode...
 	add note to
 		Save in-game and Reset to apply
-	then backport to zero40 :grimacing:
-		this was a hairy change, not loving that prospect
+
+I should move drastic.cfg into a blob 
+	to prevent tampering (which can break things)
 
 is this done?
-	yes?
+	yes? haha
 
 is release setup?
 	no
