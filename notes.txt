@@ -3,13 +3,40 @@ clock
 		this was a hairy change, not loving that prospect
 
 is this done?
-	empty screen?
-	goodbye screen?
+	yes?
 
 is release setup?
+	no
+	moved APPS to main-rgds
+	create and push main-rgds and dedicated-rgds
 
 opening lid sometimes doesn't wake from sleep
 	need to press power
 	or maybe I'm impatient
 
-convert gradient overlay to shader?
+--
+
+NOTE: build with the zero40-toolchain (!?)
+
+--
+
+# Updating
+
+1. Download the `dedicated-rgds` zip file below.
+2. Unzip the downloaded zip file and copy just system.zip to the root of your SD card.
+
+# Installing
+
+WARNING: Installation erases the SD card so backup any existing data first.
+
+1. Download and install the latest [stock Linux firmware][stock] from Anbernic.
+2. (Optional) Setup wifi if you plan to tinker over ssh/sftp.
+3. Download and unzip the latest [main-rgds][main] zip file.
+4. Copy its contents to `/Roms/APPS` on the SD card.
+5. Run Hijack from Applications > Apps on the device. It will shutdown when complete.
+6. Download and unzip the `dedicated-rgds` zip file below.
+7. Copy its contents to the root of your freshly hijacked SD card.
+8. Add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now).
+
+[stock]: https://win.anbernic.com/download/640.html
+[main]: https://github.com/dedicated-os/main-rgds/releases/latest
