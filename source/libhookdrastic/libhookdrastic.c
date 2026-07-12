@@ -2488,6 +2488,9 @@ static void App_datetime(void) {
 			XGL_SetRenderShader(renderer, default_shader);
 			XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 			
+			XGL_SetRenderDrawColor(renderer, BLACK_TRIAD,0x80);
+			XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+			
 			char *lines[] = {
 				"Save in-game then",
 				"reset to apply",
@@ -2496,7 +2499,7 @@ static void App_datetime(void) {
 			for (int i=0; i<line_count; i++) {
 				int ow;
 				Font_getTextSize(font18, lines[i], &ow, NULL);
-				Font_shadowText(renderer, font18, lines[i], (SCREEN_WIDTH-ow)/2, y + 8 + h + (i * 18), WHITE_COLOR);
+				Font_shadowText(renderer, font18, lines[i], (SCREEN_WIDTH-ow)/2, y + 8 + h + (i * 18), LIGHT_COLOR);
 			}
 			
 			AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
