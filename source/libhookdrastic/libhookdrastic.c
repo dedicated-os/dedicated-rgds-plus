@@ -50,7 +50,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define BAT_PATH 		"/sys/class/power_supply/cw2015-battery/"
 #define USB_PATH 		"/sys/class/power_supply/usb/"
 #define CPU_PATH		"/sys/devices/system/cpu/cpu0/cpufreq/"
-#define LID_PATH		"/sys/class/anbernic_misc/hallkey"
+#define LID_PATH		"/sys/class/anbernic_misc/hallkey" // 3:open,2:closed
 
 #define FREQ_MENU		"408000"
 #define FREQ_GAME		"1800000"
@@ -1272,6 +1272,8 @@ static void Device_sleep(void) {
 	App_save();
 	drastic_await_save();
 	
+	int was_closed = getInt(app.lid)==2;
+	
 	#define POWEROFF_TIMEOUT 2 * 60 * 1000 // two minutes
 	int slept_at = SDL_GetTicks();
 	int asleep = 1;
@@ -1286,6 +1288,15 @@ static void Device_sleep(void) {
 				}
 			}
 		}
+		
+		int is_closed = getInt(app.lid)==2;
+		if (is_closed) was_closed = 1;
+		
+		if (!is_closed && was_closed) {
+			asleep = 0;
+			break;
+		}
+		
 		real_SDL_Delay(200);
 	
 		if (SDL_GetTicks()>=slept_at+POWEROFF_TIMEOUT) {
