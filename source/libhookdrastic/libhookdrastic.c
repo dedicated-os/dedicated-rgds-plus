@@ -1408,7 +1408,7 @@ static void Device_poweroff(void) {
 #define POWER_TIMEOUT 1000 // one second
 static int power_at = 0;
 static int Device_tick(void) {
-	int dirty = 1;
+	int dirty = 0;
 	// must be called outside of Device_handleEvent because
 	// the power key doesn't fire repeat events so otherwise
 	// nothing triggers this check
