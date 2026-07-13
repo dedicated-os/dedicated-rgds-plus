@@ -103,26 +103,6 @@ static const char *XGL_default_fragment_shader =
 		"gl_FragColor = texture2D(u_texture, v_texcoord) * u_color;"
 	"}";
 
-static const char *XGL_sharp_original_fragment_shader =
-	"precision mediump float;"
-	"varying vec2 v_texcoord;"
-	"uniform sampler2D u_texture;"
-	"uniform vec4 u_color;"
-	"uniform vec2 u_texture_size;"
-	"void main() {"
-		"vec2 texel = v_texcoord * u_texture_size - vec2(0.5);"
-		"vec2 base = floor(texel);"
-		"vec2 frac_texel = fract(texel);"
-		"vec2 blend = clamp((frac_texel - vec2(0.35)) / 0.30, 0.0, 1.0);"
-		"vec2 uv00 = (base + vec2(0.5, 0.5)) / u_texture_size;"
-		"vec2 uv10 = (base + vec2(1.5, 0.5)) / u_texture_size;"
-		"vec2 uv01 = (base + vec2(0.5, 1.5)) / u_texture_size;"
-		"vec2 uv11 = (base + vec2(1.5, 1.5)) / u_texture_size;"
-		"vec4 c0 = mix(texture2D(u_texture, uv00), texture2D(u_texture, uv10), blend.x);"
-		"vec4 c1 = mix(texture2D(u_texture, uv01), texture2D(u_texture, uv11), blend.x);"
-		"gl_FragColor = mix(c0, c1, blend.y) * u_color;"
-	"}";
-
 // based on: https://github.com/Woohyun-Kang/Sharp-Shimmerless-Shader/blob/main/shaders_glsl/shaders/sharp-shimmerless.glsl
 static const char *XGL_sharp_vertex_shader =
 	"attribute vec2 a_position;"
@@ -314,10 +294,6 @@ XGL_Shader *XGL_CreateSharpShader(XGL_Renderer *renderer) {
 		shader->linear_filter = SDL_TRUE;
 	}
 	return shader;
-}
-
-XGL_Shader *XGL_CreateSharpShader_Original(XGL_Renderer *renderer) {
-	return XGL_CreateShader(renderer, XGL_default_vertex_shader, XGL_sharp_original_fragment_shader);
 }
 
 void XGL_DestroyShader(XGL_Shader *shader) {

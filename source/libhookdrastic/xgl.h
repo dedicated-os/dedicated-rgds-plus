@@ -33,7 +33,6 @@ void XGL_UnlockTexture(XGL_Texture *texture);
 XGL_Shader *XGL_CreateShader(XGL_Renderer *renderer, const char *vertex_source, const char *fragment_source);
 XGL_Shader *XGL_CreateLinearShader(XGL_Renderer *renderer);
 XGL_Shader *XGL_CreateSharpShader(XGL_Renderer *renderer);
-XGL_Shader *XGL_CreateSharpShader_Original(XGL_Renderer *renderer);
 void XGL_DestroyShader(XGL_Shader *shader);
 XGL_Shader *XGL_GetDefaultTextureShader(XGL_Renderer *renderer);
 int XGL_SetRenderShader(XGL_Renderer *renderer, XGL_Shader *shader);
