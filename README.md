@@ -1,6 +1,6 @@
 # DEDICATED OS
 
-DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS.
+DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS. It is also available on the [MagicX Zero40](https://github.com/dedicated-os/dedicated-zero40).
 
 This is what it looks like:
 

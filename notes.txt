@@ -44,16 +44,16 @@ then in Cutter find sym.quit, show Xrefs, and trace its args up through the call
 
 # Installing
 
-WARNING: Installation erases the SD card so backup any existing data first.
+**WARNING:** Installation erases the SD card so backup any existing data first.
 
-1. Download and install the latest [stock Linux firmware][stock] from Anbernic.
+1. Download and install the latest [stock Linux firmware][stock] from Anbernic (do not add your games yet).
 2. (Optional) Setup wifi if you plan to tinker over ssh/sftp.
 3. Download and unzip the latest [main-rgds][main] zip file.
 4. Copy its contents to `/Roms/APPS` on the SD card.
 5. Run Hijack from Applications > Apps on the device. It will shutdown when complete.
 6. Download and unzip the `dedicated-rgds` zip file below.
 7. Copy its contents to the root of your freshly hijacked SD card.
-8. Add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now).
+8. Now add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now).
 
 [stock]: https://win.anbernic.com/download/640.html
 [main]: https://github.com/dedicated-os/main-rgds/releases/latest
