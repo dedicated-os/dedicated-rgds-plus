@@ -1,22 +1,9 @@
-add README.md
-
 datetime
 	missing osd
 		because we don't re-render the top screen in datetime mode...
 
 I should move drastic.cfg into a blob 
 	to prevent tampering (which can break things)
-
-is this done?
-	yes? haha
-	need readme
-	need license
-
-is release setup?
-	yes
-	moved APPS to main-rgds
-	create and push main-rgds and dedicated-rgds
-
 
 opening lid sometimes doesn't wake from sleep
 	fixed?
