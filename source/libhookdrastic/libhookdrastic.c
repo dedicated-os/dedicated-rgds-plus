@@ -1336,6 +1336,12 @@ static void App_bye(void);
 // --------------------------------------------
 // device features
 // --------------------------------------------
+#define AWAKE_TIMEOUT (30 * 1000) // thirty seconds
+#define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes
+#define WAKE_DEFER 250 // quarter of a second
+#define POWER_TIMEOUT 1000 // one second
+static int awake_at = 0;
+static int power_at = 0;
 static void Device_mute(int mute) {
 	if (mute) raw_vol(0);
 	else Settings_setVolume(settings.volume);
@@ -1400,6 +1406,27 @@ static void Device_sleep(void) {
 
 	Pad_reset();
 }
+static void Device_poke(void) {
+	awake_at = SDL_GetTicks();
+}
+static int Device_autosleep(void) {
+	int dirty = 0;
+	
+	if (Pad_anyPressed() || Pad_anyJustPressed() || Pad_anyJustReleased()) {
+		Device_poke();
+		return dirty;
+	}
+	
+	if (SDL_GetTicks() >= awake_at+AWAKE_TIMEOUT) {
+		int is_charging = getInt(app.usb);
+		if (!is_charging) {
+			Device_sleep();
+			dirty = 1; // force redraw on wake
+		}
+		Device_poke();
+	}
+	return dirty;
+}
 static void Device_poweroff(void) {
 	App_bye();
 	App_bye();
@@ -1413,10 +1440,6 @@ static void Device_poweroff(void) {
 	raw_scr(0);
 	drastic_quit();
 }
-#define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes
-#define WAKE_DEFER 250 // quarter of a second
-#define POWER_TIMEOUT 1000 // one second
-static int power_at = 0;
 static int Device_tick(void) {
 	int dirty = 0;
 	// must be called outside of Device_handleEvent because
@@ -2194,6 +2217,9 @@ static void App_bootlogo(void) {
 		NULL,
 	};
 	
+	Pad_reset();
+	Device_poke();
+	
 	while (bootlogo) {
 		while (bootlogo && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
@@ -2206,6 +2232,9 @@ static void App_bootlogo(void) {
 			bootlogo = 0;
 			break;
 		}
+		
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
@@ -2277,8 +2306,6 @@ static void App_bootlogo(void) {
 		else {
 			real_SDL_Delay(16);
 		}
-		
-		if (Device_tick()) dirty = 1;
 	}
 	Pad_reset();
 }
@@ -2385,6 +2412,9 @@ static void App_datetime(void) {
 	int x = (SCREEN_WIDTH - w) / 2;
 	int y = (SCREEN_HEIGHT - h) / 2;
 	
+	Pad_reset();
+	Device_poke();
+	
 	int selected = FIELD_DAY;
 	while (datetime) {
 		while (datetime && Pad_pollEvent(&event)) {
@@ -2477,6 +2507,9 @@ static void App_datetime(void) {
 			datetime = 0;
 			break;
 		}
+
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
@@ -2573,8 +2606,6 @@ static void App_datetime(void) {
 		else {
 			real_SDL_Delay(16);
 		}
-		
-		if (Device_tick()) dirty = 1;
 	}
 	Pad_reset();
 }
@@ -2636,8 +2667,8 @@ static void App_menu(void) {
 	};
 	
 	Pad_reset();
+	Device_poke();
 
-	int menu_at = SDL_GetTicks();
 	int selected = 0;
 	int dirty = 1;
 	int top = 0;
@@ -2665,10 +2696,6 @@ static void App_menu(void) {
 			in_menu = 0;
 		}
 		
-		if (Pad_anyPressed()) {
-			menu_at = SDL_GetTicks(); // keep awake
-		}
-		
 		if (mode==MODE_MENU) {
 			if (Pad_justPressed(PAD_UP)) {
 				selected -= 1;
@@ -2692,13 +2719,11 @@ static void App_menu(void) {
 			
 			if (Pad_justPressed(PAD_SELECT)) {
 				App_datetime();
-				menu_at = SDL_GetTicks(); // keep awake
 				dirty = 1;
 			}
 			if (Pad_justPressed(PAD_START)) {
 				// TODO: tmp
 				App_bootlogo();
-				menu_at = SDL_GetTicks(); // keep awake
 				dirty = 1;
 			}
 			
@@ -2830,6 +2855,9 @@ static void App_menu(void) {
 			dirty = 1;
 		}
 		
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
+
 		// render
 		if (dirty) {
 			dirty = 0;
@@ -2994,18 +3022,6 @@ static void App_menu(void) {
 		else {
 			real_SDL_Delay(16);
 		}
-		
-		// TODO: this needs to be in submenus too?
-		#define MENU_TIMEOUT 30 * 1000 // thirty seconds
-		if (SDL_GetTicks()>=menu_at+MENU_TIMEOUT) {
-			if (!is_charging) {
-				Device_sleep();
-				dirty = 1;
-			}
-			menu_at = SDL_GetTicks();
-		}
-
-		if (Device_tick()) dirty = 1; // required for power off
 	}
 	
 	Pad_reset();
