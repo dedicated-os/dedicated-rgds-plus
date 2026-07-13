@@ -6,7 +6,7 @@ This is what it looks like:
 
 <img width=320 src="github/dedicated-menu.png" title=Menu /> <img width=320 src="github/dedicated-archive.png" title=Archive /> 
 
-That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-zero40/releases).
+That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-rgds/releases).
 
 ## Features
 
