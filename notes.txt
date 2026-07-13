@@ -1,3 +1,9 @@
+CHANGE LOG
+
+- 
+
+-----------------------------------------------
+
 datetime
 	missing osd
 		because we don't re-render the top screen in datetime mode...
@@ -8,11 +14,28 @@ I should move drastic.cfg into a blob
 opening lid sometimes doesn't wake from sleep
 	fixed?
 
---
+-----------------------------------------------
 
 NOTE: build with the zero40-toolchain (!?)
 
---
+-----------------------------------------------
+
+drastic (17550db727f3b59d36b57746ad1944be) from: 
+	https://github.com/ROCKNIX/packages/blob/main/drastic.tar.gz
+
+-----------------------------------------------
+
+Look up program function (eg. Drastic's quit)
+
+	nm ./drastic | grep quit
+	0000000000089c70 T lua_quit
+	000000000008a110 T platform_quit
+	000000000000e8d0 T quit
+	000000000007a260 T select_quit
+
+then in Cutter find sym.quit, show Xrefs, and trace its args up through the call sites 
+
+-----------------------------------------------
 
 # Updating
 
