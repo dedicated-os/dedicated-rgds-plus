@@ -23,11 +23,13 @@ That's it. You can [grab the latest version here](https://github.com/dedicated-o
 
 ## Presentation 
 
-DEDICATED OS offers 4 scaling modes: nearest neighbor, sharp (default), linear, and integer. Anbernic chose the wrong screen for this device. The default is the best of only bad options.
+DEDICATED OS offers 4 scaling modes on the Anbernic RG DS: nearest neighbor, sharp (default), linear, and integer. Anbernic chose the wrong screen for this device. The default is the best of only bad options.
 
 <img width=320 src="github/dedicated-nearest.png" title="Nearest Neighbor" /> <img width=320 src="github/dedicated-sharp.png" title=Sharp /> <img width=320 src="github/dedicated-linear.png" title=Linear /> <img width=320 src="github/dedicated-integer.png" title=Integer />
 
 Toggle integer scale with `MENU + L2`. Cycle through sharpness with `MENU + R2`.
+
+## Configuration 
 
 Pressing `SELECT` in the menu brings up the datetime switcher.
 
