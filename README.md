@@ -27,7 +27,7 @@ DEDICATED OS offers 4 scaling modes on the Anbernic RG DS: nearest neighbor, sha
 
 <img width=320 src="github/dedicated-nearest.png" title="Nearest Neighbor" /> <img width=320 src="github/dedicated-sharp.png" title=Sharp /> <img width=320 src="github/dedicated-linear.png" title=Linear /> <img width=320 src="github/dedicated-integer.png" title=Integer />
 
-Toggle integer scale with `MENU + L2`. Cycle through sharpness with `MENU + R2`.
+Cycle through sharpness with `MENU + R2`. Toggle integer scale with `MENU + L2`.
 
 ## Configuration 
 
