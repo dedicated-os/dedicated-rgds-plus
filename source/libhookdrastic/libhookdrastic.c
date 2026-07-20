@@ -194,6 +194,7 @@ static struct {
 	char game_path[MAX_PATH];
 	char game_name[MAX_FILE];
 	
+	// TODO: why aren't these part of raw?
 	int bat;
 	int usb;
 	int lid;
@@ -271,6 +272,7 @@ static struct {
 	snd_mixer_t *mix;
 	snd_mixer_elem_t *dac;
 } raw;
+
 static void raw_init(void) {
 	raw.bri0 = open("/sys/class/backlight/backlight1/brightness", O_WRONLY | O_CLOEXEC);
 	raw.bri1 = open("/sys/class/backlight/backlight/brightness", O_WRONLY | O_CLOEXEC);
