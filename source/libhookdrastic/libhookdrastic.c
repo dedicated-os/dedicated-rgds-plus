@@ -40,6 +40,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 
 #define CEIL_TO(x, n) (((x) + (n) - 1) / (n) * (n))
 #define NUMBER_OF(items) (sizeof(items) / sizeof((items)[0]))
+#define LOG(...) printf(__VA_ARGS__); printf("\n"); fflush(stdout)
 
 #define SDCARD_PATH		"/mnt/mmc"
 #define GAMES_PATH 		SDCARD_PATH "/games"
@@ -494,7 +495,6 @@ static ssize_t (*real_read)(int fd, void *buf, size_t count) = NULL;
 // logging
 // --------------------------------------------
 
-#define LOG(...) printf(__VA_ARGS__); printf("\n"); fflush(stdout)
 static inline void LOG_event(SDL_Event* event) {
 	switch (event->type) {
 		case SDL_QUIT:
@@ -2184,22 +2184,24 @@ static void App_quit(void) {
 	
 	SDL_DestroyTexture(app.dummy.drastic_menu);
 	XGL_DestroyTexture(app.xgl.drastic_menu);
+	
 	for (int i=0; i<SHADER_COUNT; i++) {
 		XGL_DestroyShader(app.xgl.shaders[i]);
 	}
-	
 	// drastic never destroys renderers or windows so this is safe
 	for (int i=0; i<SCREEN_COUNT; i++) {
-		SDL_DestroyTexture(app.dummy.screens[i]);
-		SDL_DestroyRenderer(app.dummy.renderers[i]);
 		XGL_DestroyTexture(app.xgl.screens[i]);
 		XGL_DestroyRenderer(app.xgl.renderers[i]);
+
+		SDL_DestroyTexture(app.dummy.screens[i]);
+		SDL_DestroyRenderer(app.dummy.renderers[i]);
+
 		SDL_GL_DeleteContext(app.xgl.contexts[i]);
 		SDL_DestroyWindow(app.xgl.windows[i]);
 	}
 	
 	XGL_Quit();
-	
+
 	Settings_save();
 	raw_quit();
 }

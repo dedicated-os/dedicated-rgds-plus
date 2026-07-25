@@ -1,6 +1,6 @@
 CHANGE LOG
 
-- 
+- fixed settings not saving on poweroff w/o sleeping first
 
 -----------------------------------------------
 

@@ -296,14 +296,23 @@ XGL_Shader *XGL_CreateSharpShader(XGL_Renderer *renderer) {
 	return shader;
 }
 
-void XGL_DestroyShader(XGL_Shader *shader) {
+static void XGL_DestroyShaderInternal(XGL_Shader *shader, int internal) {
 	if (!shader) {
 		return;
 	}
+	
+	// don't allow API user to destroy internal textures
+	if (!internal && shader->owner && shader==shader->owner->default_shader) {
+		return;
+	}
+	
 	if (shader->owner && XGL_SetCurrentRenderer(shader->owner) == 0 && shader->program) {
 		glDeleteProgram(shader->program);
 	}
 	SDL_free(shader);
+}
+void XGL_DestroyShader(XGL_Shader *shader) {
+	XGL_DestroyShaderInternal(shader, 0);
 }
 
 XGL_Shader *XGL_GetDefaultTextureShader(XGL_Renderer *renderer) {
@@ -690,7 +699,7 @@ XGL_Renderer *XGL_CreateRenderer(SDL_Window *window, SDL_GLContext context) {
 	renderer->current_shader = renderer->default_shader;
 
 	if (XGL_CreateWhiteTexture(renderer) != 0) {
-		XGL_DestroyShader(renderer->default_shader);
+		XGL_DestroyShaderInternal(renderer->default_shader, 1);
 		SDL_free(renderer);
 		return NULL;
 	}
@@ -699,7 +708,7 @@ XGL_Renderer *XGL_CreateRenderer(SDL_Window *window, SDL_GLContext context) {
 	if (!renderer->quad_vbo) {
 		SDL_SetError("glGenBuffers failed");
 		glDeleteTextures(1, &renderer->white_texture);
-		XGL_DestroyShader(renderer->default_shader);
+		XGL_DestroyShaderInternal(renderer->default_shader, 1);
 		SDL_free(renderer);
 		return NULL;
 	}
@@ -724,7 +733,7 @@ void XGL_DestroyRenderer(XGL_Renderer *renderer) {
 			glDeleteTextures(1, &renderer->white_texture);
 		}
 	}
-	XGL_DestroyShader(renderer->default_shader);
+	XGL_DestroyShaderInternal(renderer->default_shader, 1);
 	SDL_free(renderer);
 }
 
