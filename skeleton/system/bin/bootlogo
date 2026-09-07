@@ -37,4 +37,7 @@ rm -rf /tmp/bootlogo
 [ $UPDATE_2 = true ] && echo $NEW_SUM_2 > $BOOT_LAST_2
 sync
 
-reboot
+# reboot
+echo s > /proc/sysrq-trigger
+echo u > /proc/sysrq-trigger
+echo b > /proc/sysrq-trigger
