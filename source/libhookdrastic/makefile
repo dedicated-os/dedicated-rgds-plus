@@ -4,7 +4,7 @@ endif
 
 TARGET=libhookdrastic
 
-REMOTE_ADDR=192.168.7.43
+REMOTE_ADDR=192.168.7.47
 REMOTE_PATH=/mnt/mmc/system/lib
 REMOTE_DISK=root@$(REMOTE_ADDR)
 

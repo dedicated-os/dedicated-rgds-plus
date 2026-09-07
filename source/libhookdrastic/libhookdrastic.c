@@ -2585,7 +2585,8 @@ static void App_datetime(void) {
 					sprintf(c, "%c", tmp[k]);
 					int ow;
 					Font_getTextSize(font24, c, &ow, NULL);
-					font_renderer(renderer, font24, c, ox+(20-ow)/2,oy, color);
+					int tx = ox + (20 - ow) / 2 - font24->offset_x;
+					font_renderer(renderer, font24, c, tx, oy, color);
 					ox += 20;
 					ox += 4;
 				}
