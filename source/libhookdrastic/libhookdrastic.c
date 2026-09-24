@@ -348,6 +348,8 @@ static void raw_quit(void) {
 
 static void raw_vol(int value) {
 	snd_mixer_selem_set_playback_volume_all(raw.dac, value);
+static void raw_mute(void) {
+	raw_vol(0);
 }
 static void raw_bri(int value) {
 	setInt(raw.bri0, value);
@@ -397,7 +399,7 @@ static struct {
 
 #define SETTINGS_PATH USERDATA_PATH "/settings.bin"
 static void Settings_load(void) {
-	raw_vol(0);
+	raw_mute();
 	
 	if (access(SETTINGS_PATH, F_OK)!=0) return;
 	
@@ -1345,11 +1347,11 @@ static void App_bye(void);
 static int awake_at = 0;
 static int power_at = 0;
 static void Device_mute(int mute) {
-	if (mute) raw_vol(0);
+	if (mute) raw_mute();
 	else Settings_setVolume(settings.volume);
 }
 static void Device_sleep(void) {
-	raw_vol(0);
+	raw_mute();
 	raw_bri(0);
 	raw_led(1);
 	raw_scr(0);
@@ -1434,7 +1436,7 @@ static void Device_poweroff(void) {
 	App_bye();
 	sleep(2);
 	
-	raw_vol(0);
+	raw_mute();
 	App_save();
 	unlink("/tmp/exec_loop");
 	raw_bri(0);
@@ -3257,7 +3259,7 @@ int SDL_PollEvent(SDL_Event* event) {
 }
 
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
-	raw_vol(0);
+	raw_mute();
 	int result = real_SDL_OpenAudio(desired, obtained);
 	Settings_setVolume(settings.volume); // must be done here (or later)
 	return result;
