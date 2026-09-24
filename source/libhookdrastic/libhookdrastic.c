@@ -1915,7 +1915,7 @@ static void AA_bat(XGL_Renderer *renderer, int x, int y, int battery, SDL_Color 
 	if (w>0) AA_rect(renderer, x+8,y+8,w+2,12, 0, c);
 }
 static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, int shadowed) {
-	int x = 571;
+	int x = SCREEN_WIDTH - 69;
 	int y = 17;
 	
 	SDL_Color c = LIGHT_COLOR;
