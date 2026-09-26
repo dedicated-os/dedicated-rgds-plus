@@ -5,7 +5,7 @@ RELEASE_DIRT:=$(if $(shell git status --porcelain),-dirty,)
 RELEASE_TIME:=$(shell TZ=GMT date +%Y%m%d)
 RELEASE_BETA=beta-
 RELEASE_BASE=dedicated-rgds-plus-$(RELEASE_BETA)$(RELEASE_TIME)
-RELEASE_DOT:=$(shell find ./releases/. -regex ".*/${RELEASE_BASE}-[0-9]+\.zip" 2>/dev/null | wc -l | sed 's/ //g')
+RELEASE_DOT:=$(shell find ./releases/. -regex ".*/${RELEASE_BASE}-[0-9]+\(dirty\)?\.zip" 2>/dev/null | wc -l | sed 's/ //g')
 RELEASE_NAME=$(RELEASE_BASE)-$(RELEASE_DOT)$(RELEASE_DIRT)
 
 all: setup build package done
