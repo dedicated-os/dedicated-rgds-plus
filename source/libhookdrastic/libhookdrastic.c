@@ -2139,24 +2139,26 @@ static void App_background(int screen) {
 	XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,screen*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 }
 
-static void App_top(void) {
+static void App_top(int hud) {
 	XGL_Renderer *renderer = app.xgl.renderers[0];
 	App_background(0);
 	
-	Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
-	
-	char name[MAX_FILE];
-	App_getDisplayName(app.items[ui.current].name, name);
-	
-	#define MAX_LINES 8
-	char* lines[MAX_LINES];
-	int splits[MAX_LINES] = {0};
-	int line_count = App_wrap(font36, name, MAX_LINES, lines, splits);
-	SDL_Color color = WHITE_COLOR;
-	for (int i=0; i<line_count; i++) {
-		if (splits[i]) color = LIGHT_COLOR;
-		Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
-		free(lines[i]);
+	if (hud) {
+		Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
+		
+		char name[MAX_FILE];
+		App_getDisplayName(app.items[ui.current].name, name);
+		
+		#define MAX_LINES 8
+		char* lines[MAX_LINES];
+		int splits[MAX_LINES] = {0};
+		int line_count = App_wrap(font36, name, MAX_LINES, lines, splits);
+		SDL_Color color = WHITE_COLOR;
+		for (int i=0; i<line_count; i++) {
+			if (splits[i]) color = LIGHT_COLOR;
+			Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
+			free(lines[i]);
+		}
 	}
 	
 	App_battery(renderer, ui.battery,ui.charging,1);
@@ -2447,7 +2449,7 @@ static void App_bootlogo(void) {
 			}
 		}
 		
-		if (Pad_justPressed(PAD_B)) {
+		if (Pad_justPressed(PAD_B) || Pad_justPressed(PAD_BACK)) {
 			bootlogo = 0;
 			break;
 		}
@@ -2645,7 +2647,7 @@ static void App_datetime(void) {
 			}
 		}
 		
-		if (Pad_justPressed(PAD_B)) {
+		if (Pad_justPressed(PAD_B) || Pad_justPressed(PAD_BACK)) {
 			datetime = 0;
 			break;
 		}
@@ -2735,7 +2737,7 @@ static void App_datetime(void) {
 		if (dirty) {
 			dirty = 0;
 			
-			App_top();
+			App_top(0);
 			App_bottom();
 			
 			XGL_Renderer *renderer = app.xgl.renderers[1];
@@ -2898,7 +2900,7 @@ static void App_archive(int current) {
 			dirty = 1;
 		}
 		
-		if (Pad_justPressed(PAD_B)) {
+		if (Pad_justPressed(PAD_B) || Pad_justPressed(PAD_BACK)) {
 			archive = 0;
 			break;
 		}
@@ -2935,7 +2937,7 @@ static void App_archive(int current) {
 			
 			int snap = current==app.current ? SNAP_CURRENT : SNAP_SAVE;
 			App_focus(current, snap);
-			App_top();
+			App_top(1);
 			
 			XGL_Renderer *renderer = app.xgl.renderers[1];
 			XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
@@ -2994,6 +2996,114 @@ static void App_archive(int current) {
 	Pad_reset();
 }
 
+static void App_system(void) {
+	char* items[] = {
+		"ARCHIVE",
+		"DATETIME",
+	};
+	
+	int selected = 0;
+	int dirty = 1;
+	int system = 1;
+	SDL_Event event;
+	
+	Pad_reset();
+	Device_poke();
+	
+	while (system) {
+		while (system && Pad_pollEvent(&event)) {
+			if (Device_handleEvent(&event)) {
+				dirty = 1;
+				continue;
+			}
+		}
+		
+		if (Pad_justPressed(PAD_B) || Pad_justPressed(PAD_BACK)) {
+			system = 0;
+			break;
+		}
+		
+		if (Pad_justPressed(PAD_UP)) {
+			selected -= 1;
+			dirty = 1;
+		}
+		else if (Pad_justPressed(PAD_DOWN)) {
+			selected += 1;
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_A)) {
+			if (selected==0) {
+				App_archive(ui.current);
+			}
+			else if (selected==1) {
+				App_datetime();
+			}
+			dirty = 1;
+		}
+		
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
+		
+		if (dirty) {
+			dirty = 0;
+			
+			int count = NUMBER_OF(items);
+			if (selected<0) selected += count;
+			selected %= count;
+			
+			App_top(0);
+			App_bottom();
+			
+			XGL_Renderer *renderer = app.xgl.renderers[1];
+			int x,y,w,h;
+			
+			y = 0;
+			h = SCREEN_HEIGHT;
+			
+			int mw = 0;
+			for (int i=0; i<count; i++) {
+				Font_getTextSize(font24, items[i], &w, NULL);
+				if (w>mw) mw = w;
+			}
+			mw += font24->offset_x;
+			
+			w = 8 + mw + 8;
+			x = (SCREEN_WIDTH - w) / 2;
+			
+			int oh = ((count-1) * 40) + 36;
+			y += (h - oh) / 2;
+			h = oh;
+			oh = 40;
+			
+			AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+			
+			for (int i=0; i<count; i++) {
+				Font_renderFunc font_renderer = Font_shadowText;
+				SDL_Color color = WHITE_COLOR;
+				
+				if (i==selected) {
+					AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
+					AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
+					font_renderer = Font_renderText;
+					color = DARK_COLOR;
+				}
+				
+				font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
+			}
+			
+			if (app.capture) App_capture("menu");
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
+			}
+		}
+		else {
+			real_SDL_Delay(16);
+		}
+	}
+	Pad_reset();
+}
+
 static void App_menu(void) {
 	SDL_Log("enter menu");
 	app.menu = 1;
@@ -3013,12 +3123,11 @@ static void App_menu(void) {
 	char* save_items[] = {
 		"SAVE",
 		"LOAD",
-		"ARCHIVE",
 		"RESET",
 	};
 	char* load_items[] = {
 		"LOAD",
-		"ARCHIVE",
+		"RESET",
 	};
 	
 	Pad_reset();
@@ -3036,7 +3145,11 @@ static void App_menu(void) {
 			}
 		}
 		
-		if (Pad_justReleased(PAD_MENU) || Pad_justPressed(PAD_BACK)) {
+		if (Pad_justReleased(PAD_MENU)) {
+			App_system();
+			dirty = 1;
+		}
+		if (Pad_justPressed(PAD_BACK)) {
 			in_menu = 0;
 		}
 		
@@ -3060,12 +3173,8 @@ static void App_menu(void) {
 			dirty = 1;
 		}
 		
-		if (Pad_justPressed(PAD_SELECT)) {
-			App_datetime();
-			dirty = 1;
-		}
+		// TODO: tmp
 		if (Pad_justPressed(PAD_START)) {
-			// TODO: tmp
 			App_bootlogo();
 			dirty = 1;
 		}
@@ -3088,14 +3197,10 @@ static void App_menu(void) {
 				else if (selected==1) { // LOAD
 					App_load();
 				}
-				else if (selected==2) { // ARCHIVE
-					App_archive(current);
-					dirty = 1;
-				}
-				else if (selected==3) { // RESET
+				else if (selected==2) { // RESET
 					App_reset();
 				}
-				if (selected!=2) in_menu = 0;
+				in_menu = 0;
 			}
 			else {
 				if (selected==0) { // LOAD
@@ -3110,9 +3215,17 @@ static void App_menu(void) {
 				
 					in_menu = 0;
 				}
-				else if (selected==1) { // ARCHIVE
-					App_archive(current);
-					dirty = 1;
+				else if (selected==1) { // RESET
+					App_save();
+					App_set(current);
+					Settings_save();
+				
+					drastic_audio_pause(0);
+					puts("[LOAD] reset requested");
+					loader.state = LOADER_REQUESTED;
+					loader.after = LOADER_RESET;
+				
+					in_menu = 0;
 				}
 			}
 		}
@@ -3139,9 +3252,10 @@ static void App_menu(void) {
 			if (selected<0) selected += count;
 			selected %= count;
 			
-			int snap = selected==3 ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
+			int reset_selected = current==app.current ? selected==2 : selected==1;
+			int snap = reset_selected ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
 			App_focus(current, snap);
-			App_top();
+			App_top(1);
 			
 			XGL_Renderer *renderer = app.xgl.renderers[1];
 			int x,y,w,h;
