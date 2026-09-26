@@ -7,6 +7,8 @@
 #include <sys/mman.h>
 #include <setjmp.h>
 #include <dirent.h>
+#include <string.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <linux/input.h>
 #include <alsa/asoundlib.h>
@@ -1439,6 +1441,7 @@ static void App_extra(void);
 static void App_sync(int force);
 static void App_bye(void);
 static int App_status(void);
+static void TimeZone_quit(void);
 
 // --------------------------------------------
 // device features
@@ -2397,6 +2400,7 @@ static void App_quit(void) {
 	close(app.usb);
 	close(app.lid);
 	
+	TimeZone_quit();
 	Fonts_quit();
 	
 	SDL_DestroyTexture(app.dummy.drastic_menu);
@@ -2560,7 +2564,7 @@ static DateTime DateTime_get(void) {
 }
 static void DateTime_set(DateTime *dt) {
 	char cmd[512];
-	sprintf(cmd, "date -s '%d-%d-%d %d:%d:%d UTC'; hwclock --utc -w", dt->year, dt->month, dt->day, dt->hour, dt->minute, dt->second);
+	sprintf(cmd, "date -s '%d-%d-%d %d:%d:%d'; hwclock -w", dt->year, dt->month, dt->day, dt->hour, dt->minute, dt->second);
 	system(cmd);
 }
 
@@ -2825,6 +2829,350 @@ static void App_datetime(void) {
 
 // --------------------------------------------
 
+#define TZ_MAX_DEPTH 8
+
+static struct {
+	int count;
+	int current;
+	int capacity;
+	int selected;
+	int max_width;
+	SDL_Rect rect;
+	char (*items)[MAX_FILE];
+} tz;
+
+static int TimeZone_sort(const void *a, const void *b) {
+	return strcmp(a,b);
+}
+static int TimeZone_split(const char *name, char parts[TZ_MAX_DEPTH][MAX_FILE]) {
+	int count = 0;
+	char tmp[MAX_FILE];
+	strcpy(tmp, name);
+
+	char *part = tmp;
+	while (part && count<TZ_MAX_DEPTH) {
+		char *slash = strchr(part, '/');
+		if (slash) *slash++ = '\0';
+		strcpy(parts[count++], part);
+		part = slash;
+	}
+	return count;
+}
+static int TimeZone_width(const char *name) {
+	char parts[TZ_MAX_DEPTH][MAX_FILE];
+	int count = TimeZone_split(name, parts);
+
+	int slash_width;
+	Font_getTextSize(font24, "/", &slash_width, NULL);
+
+	int w = 8;
+	for (int i=0; i<count; i++) {
+		char label[MAX_FILE];
+		strcpy(label, parts[i]);
+		for (char *c=label; *c; c++) {
+			if (*c == '_') *c = ' ';
+		}
+
+		int ow;
+		Font_getTextSize(font24, label, &ow, NULL);
+		w += ow;
+
+		if (i<count-1) {
+			w += 8 + slash_width + 8;
+		}
+	}
+	w += 8;
+	return w;
+}
+static int TimeZone_matches(char parts[TZ_MAX_DEPTH][MAX_FILE], int count, char prefix[TZ_MAX_DEPTH][MAX_FILE], int prefix_count) {
+	if (count < prefix_count) return 0;
+	for (int i=0; i<prefix_count; i++) {
+		if (strcmp(parts[i], prefix[i]) != 0) return 0;
+	}
+	return 1;
+}
+static void TimeZone_init(void) {
+	if (!tz.items) {
+		tz.capacity = 512;
+		tz.items = malloc(sizeof(*tz.items) * tz.capacity);
+		if (!tz.items) return;
+
+		char line[MAX_LINE];
+		FILE *file = fopen("/usr/share/zoneinfo/zone1970.tab", "r");
+		if (file) {
+			while (fgets(line, sizeof(line), file)) {
+				if (line[0] == '#' || line[0] == '\n') continue;
+
+				char *country = line;
+				char *coords = strchr(country, '\t');
+				if (!coords) continue;
+				*coords++ = '\0';
+
+				char *name = strchr(coords, '\t');
+				if (!name) continue;
+				*name++ = '\0';
+
+				char *comment = strchr(name, '\t');
+				if (comment) *comment = '\0';
+
+				char *newline = strchr(name, '\n');
+				if (newline) *newline = '\0';
+
+				if (!name[0]) continue;
+
+				if (tz.count >= tz.capacity) {
+					tz.capacity *= 2;
+					char (*items)[MAX_FILE] = realloc(tz.items, sizeof(*tz.items) * tz.capacity);
+					if (!items) break;
+					tz.items = items;
+				}
+			
+				strcpy(tz.items[tz.count++], name);
+			}
+			fclose(file);
+		}
+	
+		qsort(tz.items, tz.count, sizeof(*tz.items), TimeZone_sort);
+	
+		tz.max_width = 0;
+		for (int i=0; i<tz.count; i++) {
+			int w = TimeZone_width(tz.items[i]);
+			if (w>tz.max_width) tz.max_width = w;
+		}
+	}
+
+	char path[MAX_PATH];
+	int len = readlink("/etc/localtime", path, sizeof(path) - 1);
+	if (len > 0) {
+		path[len] = '\0';
+
+		char *name = path;
+		char *prefix = "/usr/share/zoneinfo/";
+		if (strncmp(name, prefix, strlen(prefix)) == 0) name += strlen(prefix);
+
+		for (int i=0; i<tz.count; i++) {
+			if (strcmp(tz.items[i], name) == 0) {
+				tz.current = i;
+				break;
+			}
+		}
+	}
+
+	if (tz.current >= tz.count) tz.current = 0;
+
+	char parts[TZ_MAX_DEPTH][MAX_FILE];
+	int count = tz.count ? TimeZone_split(tz.items[tz.current], parts) : 0;
+	if (tz.selected >= count) tz.selected = count - 1;
+	if (tz.selected < 0) tz.selected = 0;
+
+	int w = tz.max_width;
+	int h = 8 + 20 + 8;
+	int x = (SCREEN_WIDTH - w) / 2;
+	int y = (SCREEN_HEIGHT - h) / 2;
+	tz.rect = (SDL_Rect){x,y,w,h};
+}
+static void TimeZone_quit(void) {
+	free(tz.items);
+	tz.items = NULL;
+	tz.count = 0;
+	tz.capacity = 0;
+}
+static void TimeZone_set(void) {
+	if (!tz.count) return;
+	DateTime datetime = DateTime_get();
+
+	char path[MAX_PATH];
+	sprintf(path, "/usr/share/zoneinfo/%s", tz.items[tz.current]);
+
+	unlink("/etc/localtime");
+	symlink(path, "/etc/localtime");
+	tzset();
+
+	DateTime_set(&datetime);
+}
+static int TimeZone_update(void) {
+	int dirty = 0;
+	if (!tz.count) return 0;
+
+	char parts[TZ_MAX_DEPTH][MAX_FILE];
+	int count = TimeZone_split(tz.items[tz.current], parts);
+	if (!count) return 0;
+
+	if (tz.selected >= count) tz.selected = count - 1;
+	if (tz.selected < 0) tz.selected = 0;
+
+	if (Pad_justRepeated(PAD_LEFT)) {
+		dirty = 1;
+		tz.selected -= 1;
+		if (tz.selected<0) tz.selected += count;
+	}
+	else if (Pad_justRepeated(PAD_RIGHT)) {
+		dirty = 1;
+		tz.selected += 1;
+		if (tz.selected>=count) tz.selected -= count;
+	}
+
+	int dir = 0;
+	if (Pad_justRepeated(PAD_UP)) dir = -1;
+	else if (Pad_justRepeated(PAD_DOWN)) dir = 1;
+
+	if (dir) {
+		char first[MAX_FILE] = "";
+		char previous[MAX_FILE] = "";
+		char next[MAX_FILE] = "";
+		char last[MAX_FILE] = "";
+		char seen[MAX_FILE] = "";
+		int found = 0;
+
+		for (int i=0; i<tz.count; i++) {
+			char item_parts[TZ_MAX_DEPTH][MAX_FILE];
+			int item_count = TimeZone_split(tz.items[i], item_parts);
+			if (item_count <= tz.selected) continue;
+			if (!TimeZone_matches(item_parts, item_count, parts, tz.selected)) continue;
+			if (strcmp(seen, item_parts[tz.selected]) == 0) continue;
+
+			strcpy(seen, item_parts[tz.selected]);
+			if (!first[0]) strcpy(first, seen);
+
+			if (found && !next[0]) strcpy(next, seen);
+			if (strcmp(seen, parts[tz.selected]) == 0) found = 1;
+			if (!found) strcpy(previous, seen);
+			strcpy(last, seen);
+		}
+
+		char selected[MAX_FILE];
+		if (dir > 0) strcpy(selected, next[0] ? next : first);
+		else strcpy(selected, previous[0] ? previous : last);
+
+		for (int i=0; i<tz.count; i++) {
+			char item_parts[TZ_MAX_DEPTH][MAX_FILE];
+			int item_count = TimeZone_split(tz.items[i], item_parts);
+			if (item_count <= tz.selected) continue;
+			if (!TimeZone_matches(item_parts, item_count, parts, tz.selected)) continue;
+			if (strcmp(item_parts[tz.selected], selected) != 0) continue;
+
+			tz.current = i;
+			count = TimeZone_split(tz.items[tz.current], parts);
+			if (tz.selected >= count) tz.selected = count - 1;
+			dirty = 1;
+			break;
+		}
+	}
+	
+	return dirty;
+}
+static void TimeZone_render(void) {
+	if (!tz.count) return;
+
+	XGL_Renderer *renderer = app.xgl.renderers[1];
+	int x = tz.rect.x;
+	int y = tz.rect.y;
+	int w = tz.rect.w;
+	int h = tz.rect.h;
+
+	AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+
+	char parts[TZ_MAX_DEPTH][MAX_FILE];
+	int count = TimeZone_split(tz.items[tz.current], parts);
+
+	int slash_width;
+	Font_getTextSize(font24, "/", &slash_width, NULL);
+	
+	char *labels[] = {
+		"REGION",
+		"AREA",
+		"LOCATION",
+	};
+	
+	int ox = x + 8;
+	int oy = y + 8;
+	for (int i=0; i<count; i++) {
+		char label[MAX_FILE];
+		strcpy(label, parts[i]);
+		for (char *c=label; *c; c++) {
+			if (*c == '_') *c = ' ';
+		}
+		
+		int j = i==0 ? 0 : (i==count-1 ? 2 : 1); 
+		Font_shadowText(renderer, font18, labels[j], ox - font24->offset_x,oy-28, LIGHT_COLOR);
+		
+		int ow;
+		Font_getTextSize(font24, label, &ow, NULL);
+
+		Font_renderFunc font_renderer = Font_shadowText;
+		SDL_Color color = WHITE_COLOR;
+		if (i == tz.selected) {
+			AA_rect(renderer, ox-2,oy-2, ow+8,28, 0, BLACK_COLOR);
+			AA_rect(renderer, ox-4,oy-4, ow+8,28, 0, WHITE_COLOR);
+			font_renderer = Font_renderText;
+			color = DARK_COLOR;
+		}
+
+		font_renderer(renderer, font24, label, ox - font24->offset_x,oy, color);
+		ox += ow;
+
+		if (i<count-1) {
+			ox += 8;
+			Font_shadowText(renderer, font24, "/", ox - font24->offset_x,oy, WHITE_COLOR);
+			ox += slash_width + 8;
+		}
+	}
+}
+
+static void App_timezone(void) {
+	int timezone = 1;
+	int dirty = 1;
+	SDL_Event event;
+	
+	TimeZone_init();
+	Pad_reset();
+	Device_poke();
+	
+	while (timezone) {
+		while (timezone && Pad_pollEvent(&event)) {
+			if (Device_handleEvent(&event)) {
+				dirty = 1;
+				continue;
+			}
+		}
+		
+		if (TimeZone_update()) dirty = 1;
+		
+		if (Pad_justPressed(PAD_A)) {
+			TimeZone_set();
+			timezone = 0;
+			break;
+		}
+		
+		if (Pad_justPressed(PAD_B) || Pad_justPressed(PAD_BACK)) {
+			timezone = 0;
+			break;
+		}
+		
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
+		
+		if (dirty) {
+			dirty = 0;
+			
+			App_top(0);
+			App_bottom();
+			TimeZone_render();
+			
+			if (app.capture) App_capture("timezone");
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
+			}
+		}
+		else {
+			real_SDL_Delay(16);
+		}
+	}
+	Pad_reset();
+}
+
+// --------------------------------------------
+
 static void App_extra(void) {
 	SDL_Surface* tmp;
 	if (!app.xgl.overlay) {
@@ -3000,6 +3348,7 @@ static void App_system(void) {
 	char* items[] = {
 		"ARCHIVE",
 		"DATETIME",
+		"TIMEZONE",
 	};
 	
 	int selected = 0;
@@ -3038,6 +3387,9 @@ static void App_system(void) {
 			}
 			else if (selected==1) {
 				App_datetime();
+			}
+			else if (selected==2) {
+				App_timezone();
 			}
 			dirty = 1;
 		}
