@@ -177,6 +177,8 @@ static struct {
 		XGL_Texture *overlay;
 		XGL_Texture *drastic_menu;
 		XGL_Texture *icons;
+		XGL_Texture *meters;
+		XGL_Texture *notches;
 		XGL_Shader *shaders[SHADER_COUNT];
 	} xgl;
 	
@@ -1441,6 +1443,19 @@ static void App_bye(void);
 #define POWER_TIMEOUT 1000 // one second
 static int awake_at = 0;
 static int power_at = 0;
+
+static void OSD_set(OSDMode osd) {
+	app.osd = osd;
+	osd_at = SDL_GetTicks();
+}
+
+static int OSD_update(void) {
+	if (app.osd==OSD_NONE) return 0;
+	if (osd_at+1000>=SDL_GetTicks()) return 0;
+	app.osd = OSD_NONE;
+	return 1;
+}
+
 static void Device_mute(int mute) {
 	if (mute) raw_mute();
 	else Settings_setVolume(settings.volume);
@@ -1560,15 +1575,14 @@ static int Device_tick(void) {
 			if (settings.brightness<10) {
 				Settings_setBrightness(settings.brightness+1);
 			}
-			app.osd = OSD_BRIGHTNESS;
+			OSD_set(OSD_BRIGHTNESS);
 		}
 		else {
 			if (settings.volume<20) {
 				Settings_setVolume(settings.volume+1);
 			}
-			app.osd = OSD_VOLUME;
+			OSD_set(OSD_VOLUME);
 		}
-		osd_at = SDL_GetTicks();
 		dirty = 1;
 	}
 	else if (Pad_justRepeated(PAD_MINUS)) {
@@ -1576,15 +1590,14 @@ static int Device_tick(void) {
 			if (settings.brightness>0) {
 				Settings_setBrightness(settings.brightness-1);
 			}
-			app.osd = OSD_BRIGHTNESS;
+			OSD_set(OSD_BRIGHTNESS);
 		}
 		else {
 			if (settings.volume>0) {
 				Settings_setVolume(settings.volume-1);
 			}
-			app.osd = OSD_VOLUME;
+			OSD_set(OSD_VOLUME);
 		}
-		osd_at = SDL_GetTicks();
 		dirty = 1;
 	}
 	
@@ -2040,29 +2053,31 @@ static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, in
 		AA_bolt(renderer, x,y,c);
 	}
 }
-static void App_OSD(XGL_Renderer *renderer, char* label, int value, int max) {
-	int nh = 28;
+static void OSD_draw(XGL_Renderer *renderer, char* label, int value, int max) {
+	if (!app.xgl.meters || !app.xgl.notches) return;
+	
 	int x,y,w,h;
-	Font_getTextSize(font16, label, &w, &h);
 	w = 252;
 	h = 64;
 	x = (SCREEN_WIDTH - w) / 2;
-	y = (SCREEN_HEIGHT - h) - 32;
+	y = (SCREEN_HEIGHT - h) - 20;
 	
-	AA_rect(renderer, x,y,w,h, 0, TRIAD_ALPHA(BLACK_TRIAD,0x60));
-
-	Font_shadowText(renderer, font16, label, x+8, y+8, LIGHT_COLOR);
+	int oy = max==10 ? 0 : h;
+	XGL_RenderCopy(renderer, app.xgl.meters, &(SDL_Rect){0,oy,w,h}, &(SDL_Rect){x,y,w,h});
 	
-	int nw = max==10?20:8;
-	int no = max==10?24:12;
-	for (int i=0; i<max; i++) {
-		int nx = x + 8;
-		int ny = y + 28;
-		AA_rect(renderer, nx+i*no+2,ny+2,nw,nh, 0, BLACK_COLOR);
-		if (i<value) {
-			AA_rect(renderer, nx+i*no,ny,nw,nh, 0, WHITE_COLOR);
-		}
-	}
+	Font_shadowText(renderer, font16, label, x+8, y+8, app.menu ? LIGHT_COLOR : WHITE_COLOR);
+	
+	if (value<=0) return;
+	
+	oy = max==10 ? 0 : 30;
+	int no = max==10 ? 24 : 12;
+	int nw = value * no;
+	int nh = 30;
+	XGL_RenderCopy(renderer, app.xgl.notches, &(SDL_Rect){0,oy,nw,nh}, &(SDL_Rect){x+8,y+28,nw,nh});
+}
+static void OSD_render(XGL_Renderer *renderer) {
+	if (app.osd==OSD_VOLUME) OSD_draw(renderer, "VOLUME", settings.volume, 20);
+	else if (app.osd==OSD_BRIGHTNESS) OSD_draw(renderer, "BRIGHTNESS", settings.brightness, 10);
 }
 static void App_bye(void) {
 	App_extra();
@@ -2260,7 +2275,10 @@ static void App_init(void) {
 	app.xgl.shaders[SHADER_LINEAR] = XGL_CreateLinearShader(renderer);
 	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
 	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
-		
+	
+	app.xgl.meters = XGL_LoadTexture(renderer, ASSETS_PATH "/meters.png");
+	app.xgl.notches = XGL_LoadTexture(renderer, ASSETS_PATH "/notches.png");
+	
 	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
 
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
@@ -2273,6 +2291,9 @@ static void App_quit(void) {
 	SDL_Log("App_quit");
 	
 	free(app.items);
+	
+	XGL_DestroyTexture(app.xgl.meters);
+	XGL_DestroyTexture(app.xgl.notches);
 	
 	if (app.xgl.icons) 		XGL_DestroyTexture(app.xgl.icons);
 	if (app.xgl.overlay) 	XGL_DestroyTexture(app.xgl.overlay);
@@ -2342,22 +2363,23 @@ static void App_bootlogo(void) {
 		
 		if (Device_autosleep()) dirty = 1;
 		if (Device_tick()) dirty = 1;
+		if (OSD_update()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_Renderer *renderer = app.xgl.renderers[i];
 				XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
-
+	
 				XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
 				XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
 				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
-			
+				
 				// top screen
 				if (i==0) {
 					Font_shadowText(renderer, font24, "Dedicated OS", 20,20, LIGHT_COLOR);
 					Font_shadowText(renderer, font36, "Nintendo DS", 20, 56+(i*36), WHITE_COLOR);
-				
+					OSD_render(renderer);
 				}
 				// bottom screen
 				else {
@@ -2619,6 +2641,7 @@ static void App_datetime(void) {
 
 		if (Device_autosleep()) dirty = 1;
 		if (Device_tick()) dirty = 1;
+		if (OSD_update()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
@@ -2787,14 +2810,9 @@ static void App_menu(void) {
 	int in_menu = 1;
 	SDL_Event event;
 	int mode = MODE_MENU;
-	int last_osd = app.osd;
 	while (in_menu) {
 		
-		if (osd_at+1000<SDL_GetTicks()) app.osd = OSD_NONE;
-		if (last_osd!=app.osd) {
-			last_osd = app.osd;
-			dirty = 1;
-		}
+		if (OSD_update()) dirty = 1;
 		
 		while (in_menu && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
@@ -2803,7 +2821,7 @@ static void App_menu(void) {
 			}
 		}
 		
-		if (Pad_justReleased(PAD_MENU)) {
+		if (Pad_justReleased(PAD_MENU) || Pad_justPressed(PAD_BACK)) {
 			in_menu = 0;
 		}
 		
@@ -3038,9 +3056,7 @@ static void App_menu(void) {
 					// battery
 					App_battery(renderer, battery,is_charging,1);
 					
-					// osd
-					if (app.osd==OSD_VOLUME) App_OSD(renderer, "VOLUME", settings.volume, 20);
-					else if (app.osd==OSD_BRIGHTNESS) App_OSD(renderer, "BRIGHTNESS", settings.brightness, 10);
+					OSD_render(renderer);
 				}
 				// bottom screen
 				else {
@@ -3155,6 +3171,8 @@ static void App_render(void) {
 		return;
 	}
 	
+	OSD_update();
+	
 	SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
 	rect.x = (SCREEN_WIDTH - rect.w) / 2;
 	rect.y = (SCREEN_HEIGHT - rect.h);
@@ -3171,8 +3189,7 @@ static void App_render(void) {
 		XGL_SetRenderShader(renderer, XGL_GetDefaultTextureShader(renderer));
 		
 		if (i==0) {
-			if (app.osd==OSD_VOLUME) App_OSD(renderer, "VOLUME", settings.volume, 20);
-			else if (app.osd==OSD_BRIGHTNESS) App_OSD(renderer, "BRIGHTNESS", settings.brightness, 10);
+			OSD_render(renderer);
 		
 			if (app.fast_forward) {
 				if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
@@ -3187,8 +3204,6 @@ static void App_render(void) {
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_RenderPresent(app.xgl.renderers[i]);
 	}
-	
-	if (osd_at+1000<SDL_GetTicks()) app.osd = OSD_NONE;
 }
 
 // --------------------------------------------
