@@ -18,24 +18,15 @@ might want a separate repo/branch to cut weight
 [x] audio after power off while shutting down
 [x] copy over system menu implementation from nope
 [x]	update readme + images for plus
+[ ] delete non-plus releases
 
 [ ] dqix crashes
 [ ] infinite space has weirdness on bottom screen in intro
 
 -----------------------------------------------
 
-why aren't the font functions declared static? copy/paste?
-	does it even matter?
-
-datetime
-	missing osd
-		because we don't re-render the top screen in datetime mode...
-
 I should move drastic.cfg into a blob 
 	to prevent tampering (which can break things)
-
-opening lid sometimes doesn't wake from sleep
-	fixed?
 
 -----------------------------------------------
 

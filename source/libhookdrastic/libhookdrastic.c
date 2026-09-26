@@ -1033,7 +1033,7 @@ Font* font16 = &(Font){
 	},
 };
 
-void Font_init(Font* font) {
+static void Font_init(Font* font) {
 	char path[MAX_FILE];
 	sprintf(path, "%s/%s", ASSETS_PATH, font->name);
 	font->bitmap = IMG_Load(path);
@@ -1057,7 +1057,7 @@ void Font_init(Font* font) {
 		}
 	}
 }
-void Font_quit(Font* font) {
+static void Font_quit(Font* font) {
 	SDL_FreeSurface(font->bitmap);
 }
 
@@ -1109,11 +1109,11 @@ static void __Font_drawText(Font* font, const char* text, int* out_width, int* o
 	if (out_surface) *out_surface = dst;
 }
 
-void Font_getTextSize(Font* font, const char* text, int* out_width, int* out_height) {
+static void Font_getTextSize(Font* font, const char* text, int* out_width, int* out_height) {
 	__Font_drawText(font, text, out_width, out_height, NULL);
 }
 
-SDL_Surface* Font_drawText(Font* font, const char* text) {
+static SDL_Surface* Font_drawText(Font* font, const char* text) {
 	SDL_Surface* surface = NULL;
 	__Font_drawText(font, text, NULL, NULL, &surface);
 	return surface;
@@ -1121,7 +1121,7 @@ SDL_Surface* Font_drawText(Font* font, const char* text) {
 
 typedef void (*Font_renderFunc)(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color);
 
-void __Font_renderText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color, int s) {	
+static void __Font_renderText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color, int s) {	
 	x += font->offset_x;
 	y += font->offset_y;
 
@@ -1141,22 +1141,22 @@ void __Font_renderText(XGL_Renderer* renderer, Font* font, const char* text, int
 	SDL_FreeSurface(surface);
 }
 
-void Font_renderText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color) {
+static void Font_renderText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color) {
 	__Font_renderText(renderer, font, text, x,y, color, 0);
 }
-void Font_shadowText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color) {
+static void Font_shadowText(XGL_Renderer* renderer, Font* font, const char* text, int x, int y, SDL_Color color) {
 	__Font_renderText(renderer, font, text, x,y, color, 1);
 }
 
 // --------------------------------------------
 
-void Fonts_init(void) {
+static void Fonts_init(void) {
 	Font_init(font36);
 	Font_init(font24);
 	Font_init(font18);
 	Font_init(font16);
 }
-void Fonts_quit(void) {
+static void Fonts_quit(void) {
 	Font_quit(font36);
 	Font_quit(font24);
 	Font_quit(font18);
