@@ -211,6 +211,16 @@ static struct {
 	int fast_forward;
 } app;
 
+static struct {
+	int current;
+	int snap;
+	int preview_current;
+	int preview_snap;
+	int battery;
+	int charging;
+	Uint32 status_at;
+} ui;
+
 static int osd_at;
 
 static int raw_x,raw_y; // touch screen fix
@@ -1433,6 +1443,7 @@ static void App_reset(void);
 static void App_extra(void);
 static void App_sync(int force);
 static void App_bye(void);
+static int App_status(void);
 
 // --------------------------------------------
 // device features
@@ -1600,6 +1611,9 @@ static int Device_tick(void) {
 		}
 		dirty = 1;
 	}
+	
+	if (OSD_update()) dirty = 1;
+	if (App_status()) dirty = 1;
 	
 	Pad_nextFrame();
 	return dirty;
@@ -2079,6 +2093,85 @@ static void OSD_render(XGL_Renderer *renderer) {
 	if (app.osd==OSD_VOLUME) OSD_draw(renderer, "VOLUME", settings.volume, 20);
 	else if (app.osd==OSD_BRIGHTNESS) OSD_draw(renderer, "BRIGHTNESS", settings.brightness, 10);
 }
+
+static int App_status(void) {
+	if (!app.menu) return 0;
+	
+	Uint32 now = SDL_GetTicks();
+	if (ui.status_at && now<ui.status_at+1000) return 0;
+	ui.status_at = now;
+	
+	int dirty = 0;
+	int charging = getInt(app.usb);
+	if (charging!=ui.charging) {
+		ui.charging = charging;
+		dirty = 1;
+	}
+	
+	int battery = getInt(app.bat);
+	if (battery!=ui.battery) {
+		ui.battery = battery;
+		dirty = 1;
+	}
+	return dirty;
+}
+
+static void App_focus(int current, int snap) {
+	ui.current = current;
+	ui.snap = snap;
+	
+	if (ui.preview_current==current && ui.preview_snap==snap) return;
+	ui.preview_current = current;
+	ui.preview_snap = snap;
+	
+	App_preview(current,0, snap);
+	App_preview(current,1, snap);
+}
+
+static void App_background(int screen) {
+	SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
+	rect.x = (SCREEN_WIDTH - rect.w) / 2;
+	rect.y = (SCREEN_HEIGHT - rect.h);
+	
+	int scale = settings.scale==SCALE_ASPECT;
+	XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
+	XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
+	XGL_Renderer *renderer = app.xgl.renderers[screen];
+	
+	XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
+	XGL_RenderCopy(renderer, app.xgl.previews[screen], NULL, scale ? NULL : &rect);
+	XGL_SetRenderShader(renderer, default_shader);
+	XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,screen*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+}
+
+static void App_top(void) {
+	XGL_Renderer *renderer = app.xgl.renderers[0];
+	App_background(0);
+	
+	Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
+	
+	char name[MAX_FILE];
+	App_getDisplayName(app.items[ui.current].name, name);
+	
+	#define MAX_LINES 8
+	char* lines[MAX_LINES];
+	int splits[MAX_LINES] = {0};
+	int line_count = App_wrap(font36, name, MAX_LINES, lines, splits);
+	SDL_Color color = WHITE_COLOR;
+	for (int i=0; i<line_count; i++) {
+		if (splits[i]) color = LIGHT_COLOR;
+		Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
+		free(lines[i]);
+	}
+	
+	App_battery(renderer, ui.battery,ui.charging,1);
+	OSD_render(renderer);
+}
+
+static void App_bottom(void) {
+	App_background(1);
+}
+
 static void App_bye(void) {
 	App_extra();
 	
@@ -2285,6 +2378,9 @@ static void App_init(void) {
 	app.usb = open(USB_PATH "online", O_RDONLY);
 	app.lid = open(LID_PATH, O_RDONLY);
 	
+	ui.preview_current = -1;
+	ui.preview_snap = -1;
+	
 	raw_led(0);
 }
 static void App_quit(void) {
@@ -2363,7 +2459,6 @@ static void App_bootlogo(void) {
 		
 		if (Device_autosleep()) dirty = 1;
 		if (Device_tick()) dirty = 1;
-		if (OSD_update()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
@@ -2641,29 +2736,14 @@ static void App_datetime(void) {
 
 		if (Device_autosleep()) dirty = 1;
 		if (Device_tick()) dirty = 1;
-		if (OSD_update()) dirty = 1;
 		
 		if (dirty) {
 			dirty = 0;
 			
-			SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
-			rect.x = (SCREEN_WIDTH - rect.w) / 2;
-			rect.y = (SCREEN_HEIGHT - rect.h);
+			App_top();
+			App_bottom();
 			
-			int scale = settings.scale==SCALE_ASPECT;
-			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
-			// XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
-			XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
-			
-			int i = 1;
-			XGL_Renderer *renderer = app.xgl.renderers[i];
-			
-			XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
-    		XGL_RenderCopy(renderer, app.xgl.previews[i], NULL, scale ? NULL : &rect);
-			
-			XGL_SetRenderShader(renderer, default_shader);
-			XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
-			
+			XGL_Renderer *renderer = app.xgl.renderers[1];
 			XGL_SetRenderDrawColor(renderer, BLACK_TRIAD,0x80);
 			XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
 			
@@ -2735,7 +2815,9 @@ static void App_datetime(void) {
 			}
 			
 			if (app.capture) App_capture("menu");
-			XGL_RenderPresent(renderer);
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
+			}
 		}
 		else {
 			real_SDL_Delay(16);
@@ -2780,14 +2862,15 @@ static void App_menu(void) {
 	Device_mute(1);
 	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
 	
-	static int last_battery = 0;
-	static int was_charging = 0;
-	
 	int current = app.current;
 	App_screenshot(current, 0, SNAP_CURRENT);
 	App_screenshot(current, 1, SNAP_CURRENT);
 	
 	App_extra();
+	ui.preview_current = -1;
+	ui.preview_snap = -1;
+	ui.status_at = 0;
+	App_focus(current, SNAP_CURRENT);
 	
 	char* save_items[] = {
 		"SAVE",
@@ -2811,9 +2894,6 @@ static void App_menu(void) {
 	SDL_Event event;
 	int mode = MODE_MENU;
 	while (in_menu) {
-		
-		if (OSD_update()) dirty = 1;
-		
 		while (in_menu && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
 				dirty = 1;
@@ -2970,20 +3050,6 @@ static void App_menu(void) {
 			}
 		}
 		
-		// TODO: should these be running every frame?
-		// TODO: need to duplicate logic in App_render()
-		int is_charging = getInt(app.usb);
-		if (is_charging!=was_charging) {
-			was_charging = is_charging;
-			dirty = 1;
-		}
-		
-		int battery = getInt(app.bat);
-		if (battery!=last_battery) {
-			last_battery = battery;
-			dirty = 1;
-		}
-		
 		if (Device_autosleep()) dirty = 1;
 		if (Device_tick()) dirty = 1;
 
@@ -3009,137 +3075,93 @@ static void App_menu(void) {
 			}
 			
 			int snap = selected==3 ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
-			App_preview(current,0, snap);
-			App_preview(current,1, snap);
+			App_focus(current, snap);
+			App_top();
 			
-			SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
-			rect.x = (SCREEN_WIDTH - rect.w) / 2;
-			rect.y = (SCREEN_HEIGHT - rect.h);
-			
-			int scale = settings.scale==SCALE_ASPECT;
-			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
-			// XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
-			XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
-			
-			// game name
-			char name[MAX_FILE];
-			App_getDisplayName(app.items[current].name, name);
-			
-			for (int i=0; i<SCREEN_COUNT; i++) {
-				XGL_Renderer *renderer = app.xgl.renderers[i];
-				if (i && mode==MODE_ARCHIVE); // don't draw bottom screen in archive mode
-				else {
-					XGL_SetRenderShader(renderer, scale ? screen_shader : default_shader);
-		    		XGL_RenderCopy(renderer, app.xgl.previews[i], NULL, scale ? NULL : &rect);
-				}
-	    
-				XGL_SetRenderShader(renderer, default_shader);
-				XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+			XGL_Renderer *renderer = app.xgl.renderers[1];
+			int x,y,w,h;
+			if (mode==MODE_MENU) {
+				App_bottom();
 				
-				// top screen
-				if (i==0) {
-					// system
-					Font_shadowText(renderer, font24, "Nintendo DS", 20,20, LIGHT_COLOR);
-					
-					// game name
-					#define MAX_LINES 8
-					char* lines[MAX_LINES];
-					int splits[MAX_LINES] = {0};
-					int line_count = App_wrap(font36, name, MAX_LINES, lines, splits);
+				// center in bottom "screen"
+				y = 0;
+				h = SCREEN_HEIGHT;
+	
+				int mw = 0;
+				for (int i=0; i<count; i++) {
+					Font_getTextSize(font24, items[i], &w, NULL);
+					if (w>mw) mw = w;
+				}
+				mw += font24->offset_x;
+				
+				w = 8 + mw + 8;
+				x = (SCREEN_WIDTH - w) / 2;
+	
+				int oh = ((count-1) * 40) + 36;
+				y += (h - oh) / 2;
+				h = oh;
+				oh = 40;
+	
+				AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+	
+				for (int i=0; i<count; i++) {
+					Font_renderFunc font_renderer = Font_shadowText;
 					SDL_Color color = WHITE_COLOR;
-					for (int i=0; i<line_count; i++) {
-						if (splits[i]) color = LIGHT_COLOR;
-						Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
-						free(lines[i]);
+		
+					if (i==selected) {
+						AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
+						AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
+						font_renderer = Font_renderText;
+						color = DARK_COLOR;
 					}
-					
-					// battery
-					App_battery(renderer, battery,is_charging,1);
-					
-					OSD_render(renderer);
+		
+					font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
 				}
-				// bottom screen
+			}
+			else if (mode==MODE_ARCHIVE) {
+				XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
+				XGL_SetRenderDrawColor(renderer, BLACK_TRIAD,0xff);
+				XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+				
+				// calculate viewport
+				if (app.count<=rows) {
+					top = 0;
+				}
 				else {
-					int x,y,w,h;
-					if (mode==MODE_MENU) {
-						// center in bottom "screen"
-						y = 0;
-						h = SCREEN_HEIGHT;
-			
-						int mw = 0;
-						for (int i=0; i<count; i++) {
-							Font_getTextSize(font24, items[i], &w, NULL);
-							if (w>mw) mw = w;
-						}
-						mw += font24->offset_x;
-						
-						w = 8 + mw + 8;
-						x = (SCREEN_WIDTH - w) / 2;
-			
-						int oh = ((count-1) * 40) + 36;
-						y += (h - oh) / 2;
-						h = oh;
-						oh = 40;
-			
-						AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
-			
-						for (int i=0; i<count; i++) {
-							Font_renderFunc font_renderer = Font_shadowText;
-							SDL_Color color = WHITE_COLOR;
-				
-							if (i==selected) {
-								AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
-								AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
-								font_renderer = Font_renderText;
-								color = DARK_COLOR;
-							}
-				
-							font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
-						}
-					}
-					else if (mode==MODE_ARCHIVE) {
-						// calculate viewport
-						if (app.count<=rows) {
-							top = 0;
-						}
-						else {
-							int max = app.count - rows;
-							int bottom = top + rows - 1;
-							if (current<top) top = current;
-							else if (current>bottom) top = current - (rows - 1);
-							if (top<0) top = 0;
-							if (top>max) top = max;
-						}
-						int end = top + rows;
-						if (end>app.count) end = app.count;
-				
-						x = 0;
-						y = 0;
-						h = 40;
-				
-						// draw viewport
-						for (int i=top; i<end; i++) {
-							int row = i - top;
-							int oy = y + row * h;
-					
-							Entry* item = &app.items[i];
-							SDL_Color c = item->hidden ? LIGHT_COLOR : WHITE_COLOR;
-							if (i==current) {
-								AA_rect(renderer, x,oy,SCREEN_WIDTH,h, 0, c);
-								c = BLACK_COLOR;
-							}
-					
-							char fit[MAX_FILE];
-							App_getDisplayName(item->name, name);
-							App_trunc(font24, name, SCREEN_WIDTH-40, fit);
-					
-							XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+8,oy+8,24,24});
-							Font_renderText(renderer, font24, fit,	x+40,oy+10, c);
-						}
-					}
+					int max = app.count - rows;
+					int bottom = top + rows - 1;
+					if (current<top) top = current;
+					else if (current>bottom) top = current - (rows - 1);
+					if (top<0) top = 0;
+					if (top>max) top = max;
 				}
-				
-				rect.y = 0;
+				int end = top + rows;
+				if (end>app.count) end = app.count;
+		
+				x = 0;
+				y = 0;
+				h = 40;
+		
+				// draw viewport
+				for (int i=top; i<end; i++) {
+					int row = i - top;
+					int oy = y + row * h;
+			
+					Entry* item = &app.items[i];
+					SDL_Color c = item->hidden ? LIGHT_COLOR : WHITE_COLOR;
+					if (i==current) {
+						AA_rect(renderer, x,oy,SCREEN_WIDTH,h, 0, c);
+						c = BLACK_COLOR;
+					}
+			
+					char name[MAX_FILE];
+					char fit[MAX_FILE];
+					App_getDisplayName(item->name, name);
+					App_trunc(font24, name, SCREEN_WIDTH-40, fit);
+			
+					XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+8,oy+8,24,24});
+					Font_renderText(renderer, font24, fit,	x+40,oy+10, c);
+				}
 			}
 			
 			if (app.capture) App_capture("menu");
@@ -3170,8 +3192,6 @@ static void App_render(void) {
 		XGL_RenderPresent(renderer);
 		return;
 	}
-	
-	OSD_update();
 	
 	SDL_Rect rect = {0,0,DS_WIDTH*2,DS_HEIGHT*2};
 	rect.x = (SCREEN_WIDTH - rect.w) / 2;
@@ -3262,6 +3282,9 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 	
 	App_render(); // complete render takeover
 
+	// no before-drastic-frame hook so call this 
+	// as late as possible so it's ready at the 
+	// beginning of the next frame
 	Device_tick();
 }
 
