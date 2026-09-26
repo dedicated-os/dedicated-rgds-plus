@@ -1438,7 +1438,6 @@ static void App_load(void);
 static void App_save(void);
 static void App_reset(void);
 static void App_extra(void);
-static void App_sync(int force);
 static void App_bye(void);
 static int App_status(void);
 static void TimeZone_quit(void);
@@ -1637,21 +1636,6 @@ static int Device_handleEvent(SDL_Event* event) {
 	}
 	
 	if (Pad_isPressed(PAD_MENU)) {
-		// if (Pad_justPressed(PAD_L2)) {
-		// 	Pad_consume(PAD_L2);
-		// 	settings.scale = (settings.scale + 1) % SCALE_COUNT;
-		// 	App_sync(1);
-		// 	menu_combo = 1;
-		// 	return 1;
-		// }
-		// else if (Pad_justPressed(PAD_R2)) {
-		// 	Pad_consume(PAD_R2);
-		// 	settings.shader = (settings.shader + 1) % SHADER_COUNT;
-		// 	App_sync(1);
-		// 	menu_combo = 1;
-		// 	return 1;
-		// }
-
 		if (Pad_justPressed(PAD_START)) {
 			Pad_consume(PAD_START);
 			app.capture = 1;
@@ -1765,7 +1749,7 @@ static void App_preview(int game, int screen, int snap) {
 	
 	SDL_FreeSurface(tmp);
 }
-static int App_capture(const char *name) {
+static void App_capture(const char *name) {
 	char path[MAX_PATH];
 	sprintf(path, "/tmp/capture-%s.bmp", name);
 	SDL_Surface *tmp = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT*2, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -1774,12 +1758,6 @@ static int App_capture(const char *name) {
 	SDL_SaveBMP(tmp, path);
 	SDL_FreeSurface(tmp);
 	app.capture = 0;
-}
-static void App_sync(int force) {
-	if (force) app.synced = 0;
-	if (app.synced) return;	
-	
-	// TODO: no-op here?
 }
 static void App_load(void) {
 	drastic_load_state(AUTO_SLOT);
@@ -3159,7 +3137,7 @@ static void App_timezone(void) {
 			App_bottom();
 			TimeZone_render();
 			
-			if (app.capture) App_capture("timezone");
+			if (app.capture) App_capture("menu");
 			for (int i=0; i<SCREEN_COUNT; i++) {
 				XGL_RenderPresent(app.xgl.renderers[i]);
 			}
@@ -3345,6 +3323,9 @@ static void App_archive(int current) {
 }
 
 static void App_system(void) {
+	int current = ui.current;
+	int snap = ui.snap;
+	
 	char* items[] = {
 		"ARCHIVE",
 		"DATETIME",
@@ -3384,6 +3365,7 @@ static void App_system(void) {
 		if (Pad_justPressed(PAD_A)) {
 			if (selected==0) {
 				App_archive(ui.current);
+				App_focus(current, snap);
 			}
 			else if (selected==1) {
 				App_datetime();
@@ -3526,10 +3508,10 @@ static void App_menu(void) {
 		}
 		
 		// TODO: tmp
-		if (Pad_justPressed(PAD_START)) {
-			App_bootlogo();
-			dirty = 1;
-		}
+		// if (Pad_justPressed(PAD_START)) {
+		// 	App_bootlogo();
+		// 	dirty = 1;
+		// }
 		
 		if (Pad_justPressed(PAD_B)) {
 			if (current!=app.current) {
