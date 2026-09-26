@@ -4,24 +4,8 @@ CHANGE LOG
 
 -----------------------------------------------
 
-PLUS
-
-had to hack a bunch of things
-might want a separate repo/branch to cut weight
-
-[x] grab dirty logic from nope
 [/] increase type size 1.5x
-[/] boot logo
-	fix banding
-[x] remove MENU+L2/R2 bindings
-[x] there's audio while fast forwarding
-[x] audio after power off while shutting down
-[x] copy over system menu implementation from nope
-[x]	update readme + images for plus
 [ ] delete non-plus releases
-
-[ ] dqix crashes
-[ ] infinite space has weirdness on bottom screen in intro
 
 -----------------------------------------------
 
