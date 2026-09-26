@@ -65,8 +65,10 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define MAX_PATH 512
 #define MAX_FILE 256
 
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 480
+// #define SCREEN_WIDTH  640
+// #define SCREEN_HEIGHT 480
+#define SCREEN_WIDTH 1024
+#define SCREEN_HEIGHT 768
 #define SCREEN_COUNT 2 // duh
 
 #define DS_WIDTH 256
@@ -262,6 +264,7 @@ static struct {
 	int bri1;
 	int led0;
 	int led1;
+	int jck;
 
 	int drm;
 	struct {
@@ -270,15 +273,28 @@ static struct {
 	} dsi[SCREEN_COUNT];
 	int dsi_count;
 	
-	snd_mixer_t *mix;
-	snd_mixer_elem_t *dac;
+	int jack;
+	struct {
+		snd_mixer_t *mix;
+		snd_mixer_elem_t *dac;
+	} hp;
+	
+	struct {
+		snd_mixer_t *mix;
+		snd_mixer_elem_t *dev0;
+		snd_mixer_elem_t *dev1;
+		snd_mixer_elem_t *swi0;
+		snd_mixer_elem_t *swi1;
+	} spk;
 } raw;
 
+static void raw_poll(void);
 static void raw_init(void) {
 	raw.bri0 = open("/sys/class/backlight/backlight1/brightness", O_WRONLY | O_CLOEXEC);
 	raw.bri1 = open("/sys/class/backlight/backlight/brightness", O_WRONLY | O_CLOEXEC);
 	raw.led0 = open("/sys/class/anbernic_misc/lowpwr_led", O_WRONLY | O_CLOEXEC);
 	raw.led1 = open("/sys/class/anbernic_misc/work_led", O_WRONLY | O_CLOEXEC);
+	raw.jck = open("/sys/class/anbernic_misc/spk_state", O_RDONLY | O_CLOEXEC);
 	
 	// I hate drm code
 	raw.drm = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
@@ -326,16 +342,48 @@ static void raw_init(void) {
 	}
 	
 	// I hate audio code
-	snd_mixer_open(&raw.mix, 0);
-	snd_mixer_attach(raw.mix, "hw:0");
-	snd_mixer_selem_register(raw.mix, NULL, NULL);
-	snd_mixer_load(raw.mix);
+	snd_mixer_open(&raw.hp.mix, 0);
+	snd_mixer_attach(raw.hp.mix, "hw:0");
+	snd_mixer_selem_register(raw.hp.mix, NULL, NULL);
+	snd_mixer_load(raw.hp.mix);
+
+	snd_mixer_open(&raw.spk.mix, 0);
+	snd_mixer_attach(raw.spk.mix, "hw:1");
+	snd_mixer_selem_register(raw.spk.mix, NULL, NULL);
+	snd_mixer_load(raw.spk.mix);
 
 	snd_mixer_selem_id_t *sid;
 	snd_mixer_selem_id_alloca(&sid);
 	snd_mixer_selem_id_set_index(sid, 0);
 	snd_mixer_selem_id_set_name(sid, "DAC");
-	raw.dac = snd_mixer_find_selem(raw.mix, sid);
+	raw.hp.dac = snd_mixer_find_selem(raw.hp.mix, sid);
+
+	snd_mixer_selem_id_t *sid0;
+	snd_mixer_selem_id_alloca(&sid0);
+	snd_mixer_selem_id_set_index(sid0, 0);
+	snd_mixer_selem_id_set_name(sid0, "aw_dev_0_rx_volume");
+	raw.spk.dev0 = snd_mixer_find_selem(raw.spk.mix, sid0);
+
+	snd_mixer_selem_id_t *sid1;
+	snd_mixer_selem_id_alloca(&sid1);
+	snd_mixer_selem_id_set_index(sid1, 0);
+	snd_mixer_selem_id_set_name(sid1, "aw_dev_1_rx_volume");
+	raw.spk.dev1 = snd_mixer_find_selem(raw.spk.mix, sid1);
+	
+	snd_mixer_selem_id_t *sid2;
+	snd_mixer_selem_id_alloca(&sid2);
+	snd_mixer_selem_id_set_index(sid2, 0);
+	snd_mixer_selem_id_set_name(sid2, "aw_dev_0_switch");
+	raw.spk.swi0 = snd_mixer_find_selem(raw.spk.mix, sid2);
+
+	snd_mixer_selem_id_t *sid3;
+	snd_mixer_selem_id_alloca(&sid3);
+	snd_mixer_selem_id_set_index(sid3, 0);
+	snd_mixer_selem_id_set_name(sid3, "aw_dev_1_switch");
+	raw.spk.swi1 = snd_mixer_find_selem(raw.spk.mix, sid3);
+	
+	raw.jack = -1;
+	raw_poll();
 }
 static void raw_quit(void) {
 	close(raw.bri0);
@@ -343,11 +391,82 @@ static void raw_quit(void) {
 	close(raw.led0);
 	close(raw.led1);
 	close(raw.drm);
-	snd_mixer_close(raw.mix);
+	close(raw.jck);
+	snd_mixer_close(raw.hp.mix);
+	snd_mixer_close(raw.spk.mix);
 }
 
-static void raw_vol(int value) {
-	snd_mixer_selem_set_playback_volume_all(raw.dac, value);
+static void raw_spk(int enable) {
+    snd_mixer_selem_set_enum_item(raw.spk.swi0, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
+    snd_mixer_selem_set_enum_item(raw.spk.swi1, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
+}
+static void raw_poll(void) {
+    static uint32_t next = 0;
+
+    uint32_t now = SDL_GetTicks();
+    if (now < next) return;
+    next = now + 250;
+
+    int jack = getInt(raw.jck) == 1;
+    if (jack == raw.jack) return;
+
+    raw.jack = jack;
+    if (!app.fast_forward) raw_spk(!jack);
+}
+
+static void raw_vol(int value) { // 0-20, not really raw anymore
+	static const uint8_t hp_raw[21] = {
+		  0, // mute
+		128, // 0
+	  	135, // 7
+	  	141, // 6
+	  	148, // 7
+	  	154, // 6
+	  	161, // 7
+	  	167, // 6
+	  	174, // 7
+	  	180, // 6
+	  	187, // 7
+	  	193, // 6
+	  	200, // 7
+	  	206, // 6
+	  	213, // 7
+	  	219, // 6
+	  	226, // 7
+	  	232, // 6
+	  	239, // 7
+	  	245, // 6
+	  	252, // 7
+	};
+	
+	static const uint16_t spk_raw[21] = {
+	    1024, // mute
+	     512, // 512
+		 480, // 32
+		 448, // 32
+		 424, // 24
+		 392, // 32
+	     360, // 32
+		 336, // 24
+		 304, // 32
+		 280, // 24
+		 256, // 24
+	     224, // 24
+		 200, // 24
+		 176, // 24
+		 152, // 24
+		 128, // 24
+	     104, // 24
+		  80, // 24 
+		  56, // 24
+		  32, // 24
+		   0, // 32
+	};
+	
+	snd_mixer_selem_set_playback_volume_all(raw.hp.dac, hp_raw[value]);
+	snd_mixer_selem_set_playback_volume_all(raw.spk.dev0, spk_raw[value]);
+	snd_mixer_selem_set_playback_volume_all(raw.spk.dev1, spk_raw[value]);
+}
 static void raw_mute(void) {
 	raw_vol(0);
 }
@@ -415,31 +534,7 @@ static void Settings_save(void) {
 	fclose(file);
 }
 static void Settings_setVolume(int value) {
-	static const uint8_t raw[21] = {
-		  0, // mute
-		128, // 0
-  		135, // 7
-  		141, // 6
-  		148, // 7
-  		154, // 6
-  		161, // 7
-  		167, // 6
-  		174, // 7
-  		180, // 6
-  		187, // 7
-  		193, // 6
-  		200, // 7
-  		206, // 6
-  		213, // 7
-  		219, // 6
-  		226, // 7
-  		232, // 6
-  		239, // 7
-  		245, // 6
-  		252, // 7
-	};
-	
-	raw_vol(raw[value]);
+	raw_vol(value);
 	settings.volume = value;
 }
 static void Settings_setBrightness(int value) {
@@ -1349,6 +1444,9 @@ static int power_at = 0;
 static void Device_mute(int mute) {
 	if (mute) raw_mute();
 	else Settings_setVolume(settings.volume);
+	
+	if (raw.jack) raw_spk(0);
+	else raw_spk(!mute);
 }
 static void Device_sleep(void) {
 	raw_mute();
@@ -1442,9 +1540,12 @@ static void Device_poweroff(void) {
 	raw_bri(0);
 	raw_led(1);
 	raw_scr(0);
+	raw_spk(0);
 	drastic_quit();
 }
 static int Device_tick(void) {
+	raw_poll();
+	
 	int dirty = 0;
 	// must be called outside of Device_handleEvent because
 	// the power key doesn't fire repeat events so otherwise
@@ -1511,20 +1612,20 @@ static int Device_handleEvent(SDL_Event* event) {
 	}
 	
 	if (Pad_isPressed(PAD_MENU)) {
-		if (Pad_justPressed(PAD_L2)) {
-			Pad_consume(PAD_L2);
-			settings.scale = (settings.scale + 1) % SCALE_COUNT;
-			App_sync(1);
-			menu_combo = 1;
-			return 1;
-		}
-		else if (Pad_justPressed(PAD_R2)) {
-			Pad_consume(PAD_R2);
-			settings.shader = (settings.shader + 1) % SHADER_COUNT;
-			App_sync(1);
-			menu_combo = 1;
-			return 1;
-		}
+		// if (Pad_justPressed(PAD_L2)) {
+		// 	Pad_consume(PAD_L2);
+		// 	settings.scale = (settings.scale + 1) % SCALE_COUNT;
+		// 	App_sync(1);
+		// 	menu_combo = 1;
+		// 	return 1;
+		// }
+		// else if (Pad_justPressed(PAD_R2)) {
+		// 	Pad_consume(PAD_R2);
+		// 	settings.shader = (settings.shader + 1) % SHADER_COUNT;
+		// 	App_sync(1);
+		// 	menu_combo = 1;
+		// 	return 1;
+		// }
 
 		if (Pad_justPressed(PAD_START)) {
 			Pad_consume(PAD_START);
@@ -2214,12 +2315,12 @@ static void App_bootlogo(void) {
 	SDL_Event event;
 	
 	const char *hints[] = {
-		"Scale", "MENU+L2",
+		// "Scale", "MENU+L2",
 		"Lid",	"L2",
 		"Mic",	"R2",
-		"Sharpness", "MENU+R2",
+		// "Sharpness", "MENU+R2",
 		"Brightness", "MENU+VOLUME",
-		"Fast Forward", "HOME/BACK",
+		"Fast Forward", "BACK",
 		NULL,
 	};
 	
@@ -2263,6 +2364,8 @@ static void App_bootlogo(void) {
 					int lw = 0;
 					int rw = 0;
 					
+					int s = 4;
+						
 					// layout pass
 					for (int i = 0; hints[i] != NULL; i += 2) {
 						const char *hint = hints[i];
@@ -2270,12 +2373,12 @@ static void App_bootlogo(void) {
 						
 						int w,h;
 						Font_getTextSize(font16, hint, &w, &h);
-						if (i<6 && w>lw) lw = w; // left
-						else if (i>=6 && w>rw) rw = w; // right
+						if (i<s && w>lw) lw = w; // left
+						else if (i>=s && w>rw) rw = w; // right
 						
 						Font_getTextSize(font24, trigger, &w, &h);
-						if (i<6 && w>lw) lw = w; // left
-						else if (i>=6 && w>rw) rw = w; // right
+						if (i<s && w>lw) lw = w; // left
+						else if (i>=s && w>rw) rw = w; // right
 					}
 					
 					int pad = (SCREEN_WIDTH - lw - rw) / 3;
@@ -2290,8 +2393,8 @@ static void App_bootlogo(void) {
 						const char *hint = hints[i];
 						const char *trigger = hints[i + 1];
 						
-						int j = i % 6;
-						if (i==6) {
+						int j = i % s;
+						if (i==s) {
 							x = ox + lw + pad;
 							y = oy;
 						}
@@ -2526,7 +2629,8 @@ static void App_datetime(void) {
 			
 			int scale = settings.scale==SCALE_ASPECT;
 			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
-			XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+			// XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+			XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
 			
 			int i = 1;
 			XGL_Renderer *renderer = app.xgl.renderers[i];
@@ -2679,7 +2783,7 @@ static void App_menu(void) {
 	int selected = 0;
 	int dirty = 1;
 	int top = 0;
-	int rows = 15;
+	int rows = 19;
 	int in_menu = 1;
 	SDL_Event event;
 	int mode = MODE_MENU;
@@ -2896,7 +3000,8 @@ static void App_menu(void) {
 			
 			int scale = settings.scale==SCALE_ASPECT;
 			XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
-			XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+			// XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+			XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
 			
 			// game name
 			char name[MAX_FILE];
@@ -2994,7 +3099,7 @@ static void App_menu(void) {
 				
 						x = 0;
 						y = 0;
-						h = 32;
+						h = 40;
 				
 						// draw viewport
 						for (int i=top; i<end; i++) {
@@ -3010,10 +3115,10 @@ static void App_menu(void) {
 					
 							char fit[MAX_FILE];
 							App_getDisplayName(item->name, name);
-							App_trunc(font18, name, SCREEN_WIDTH-40, fit);
+							App_trunc(font24, name, SCREEN_WIDTH-40, fit);
 					
-							XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+4,oy+4,24,24});
-							Font_renderText(renderer, font18, fit,	x+32,oy+9, c);
+							XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+8,oy+8,24,24});
+							Font_renderText(renderer, font24, fit,	x+40,oy+10, c);
 						}
 					}
 				}
@@ -3056,7 +3161,8 @@ static void App_render(void) {
 	
 	int scale = settings.scale==SCALE_ASPECT;
 	XGL_Shader *default_shader = app.xgl.shaders[SHADER_NEAREST];
-	XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
+	XGL_Shader *screen_shader = app.xgl.shaders[SHADER_NEAREST];
+	// XGL_Shader *screen_shader = app.xgl.shaders[settings.shader];
 	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];

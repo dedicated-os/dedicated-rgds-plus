@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# speakers: card 1 AW883xx amp attenuation
+amixer -q -c 1 cset numid=27 "$1"
+amixer -q -c 1 cset numid=23 "$1"

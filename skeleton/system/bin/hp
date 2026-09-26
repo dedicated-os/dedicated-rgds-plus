@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# headphones: card 0 DAC Playback Volume, stereo
+amixer -q -c 0 cset numid=15 "$1,1"

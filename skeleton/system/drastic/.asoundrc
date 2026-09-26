@@ -1,0 +1,43 @@
+pcm.rk817_out {
+    type plug
+    slave.pcm "hw:0,0"
+}
+
+pcm.aw883xx_out {
+    type plug
+    slave.pcm "hw:1,0"
+}
+
+pcm.rgds_plus_multi {
+    type multi
+    slaves.a.pcm "rk817_out"
+    slaves.a.channels 2
+    slaves.b.pcm "aw883xx_out"
+    slaves.b.channels 2
+
+    bindings.0.slave a
+    bindings.0.channel 0
+    bindings.1.slave a
+    bindings.1.channel 1
+    bindings.2.slave b
+    bindings.2.channel 0
+    bindings.3.slave b
+    bindings.3.channel 1
+}
+
+pcm.!default {
+    type route
+    slave.pcm "rgds_plus_multi"
+    slave.channels 4
+
+    ttable.0.0 1
+    ttable.1.1 1
+    ttable.0.2 1
+    ttable.1.3 1
+}
+
+ctl.!default {
+    type hw
+    card 0
+}
+
