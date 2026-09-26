@@ -4,7 +4,7 @@ DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific
 
 This is what it looks like:
 
-<img width=512 src="github/dedicated-menu.png" title=Menu /> <img width=512 src="github/dedicated-archive.png" title=Archive /> 
+<img width=256 src="github/dedicated-menu.png" title=Menu /> <img width=256 src="github/dedicated-archive.png" title=Archive /> 
 
 That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-rgds/releases).
 
@@ -27,7 +27,7 @@ Press the Anbernic/MENU button to open the in-game menu where you can save, load
 
 Press MENU again to open the system menu where you can manage your archive and set the date, time, and timezone.
 
-<img width=512 src="github/dedicated-datetime.png" title=Datetime /> <img width=512 src="github/dedicated-timezone.png" title=Timezone /> 
+<img width=256 src="github/dedicated-datetime.png" title=Datetime /> <img width=256 src="github/dedicated-timezone.png" title=Timezone /> 
 
 L2 simulates closing the lid. R2 simulates the mic.
 
