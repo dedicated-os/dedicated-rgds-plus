@@ -1,38 +1,36 @@
 # DEDICATED OS
 
-DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS. It is also available on the [MagicX Zero40](https://github.com/dedicated-os/dedicated-zero40).
+DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS Plus. It is also available on the [MagicX Zero40](https://github.com/dedicated-os/dedicated-zero40).
 
 This is what it looks like:
 
-<img width=320 src="github/dedicated-menu.png" title=Menu /> <img width=320 src="github/dedicated-archive.png" title=Archive /> 
+<img width=512 src="github/dedicated-menu.png" title=Menu /> <img width=512 src="github/dedicated-archive.png" title=Archive /> 
 
 That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-rgds/releases).
 
 ## Features
 
 - no options
-- datetime switcher
-- single save state
+- single save state per game
 - fast game switcher
 - drastic for emulation
-- fast-forward
+- silent fast-forward
+- datetime and timezone switcher
 - archive for hiding completed or unstarted games
-- auto-save on poweroff, when switching games
-- auto-resume on boot
+- auto-save on poweroff and when switching games
+- auto-resume on boot and when switching games
 - faux-sleep with auto-poweroff
 
-## Presentation 
+## Usage
 
-DEDICATED OS offers 4 scaling modes on the Anbernic RG DS: nearest neighbor, sharp (default), linear, and integer. Anbernic chose the wrong screen for this device. The default is the best of only bad options.
+Press the Anbernic/MENU button to open the in-game menu where you can save, load, and reset the current game or switch to and load or reset a different game. 
 
-<img width=320 src="github/dedicated-nearest.png" title="Nearest Neighbor" /> <img width=320 src="github/dedicated-sharp.png" title=Sharp /> <img width=320 src="github/dedicated-linear.png" title=Linear /> <img width=320 src="github/dedicated-integer.png" title=Integer />
+Press MENU again to open the system menu where you can manage your archive and set the date, time, and timezone.
 
-Cycle through sharpness with `MENU + R2`. Toggle integer scale with `MENU + L2`.
+<img width=512 src="github/dedicated-datetime.png" title=Datetime /> <img width=512 src="github/dedicated-timezone.png" title=Timezone /> 
 
-## Configuration 
+L2 simulates closing the lid. R2 simulates the mic.
 
-Pressing `SELECT` in the menu brings up the datetime switcher.
+## Original RG DS Support
 
-<img width=320 src="github/dedicated-datetime.png" title=Datetime /> 
-
-After changing the datetime you must save in-game then reset from the menu for the game to notice the change.
+The original RG DS is unsupported, its 640x480 screens were a mistake and I won't dignify it with a release.

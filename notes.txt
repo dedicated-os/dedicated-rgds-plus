@@ -16,8 +16,8 @@ might want a separate repo/branch to cut weight
 [x] remove MENU+L2/R2 bindings
 [x] there's audio while fast forwarding
 [x] audio after power off while shutting down
-[ ] copy over system menu implementation from nope
-[ ]	update readme + images for plus
+[x] copy over system menu implementation from nope
+[x]	update readme + images for plus
 
 [ ] dqix crashes
 [ ] infinite space has weirdness on bottom screen in intro
