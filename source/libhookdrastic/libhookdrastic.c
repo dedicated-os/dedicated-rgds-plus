@@ -142,11 +142,6 @@ typedef enum {
 } OSDMode;
 
 typedef enum {
-	MODE_MENU,
-	MODE_ARCHIVE,
-} MenuMode;
-
-typedef enum {
 	SCALE_NATIVE,
 	SCALE_ASPECT,
 
@@ -2856,6 +2851,149 @@ static void App_extra(void) {
 	}
 	
 }
+
+static void App_archive(int current) {
+	int archive = 1;
+	int dirty = 1;
+	int top = 0;
+	int rows = 19;
+	SDL_Event event;
+	
+	Pad_reset();
+	Device_poke();
+	
+	while (archive) {
+		while (archive && Pad_pollEvent(&event)) {
+			if (Device_handleEvent(&event)) {
+				dirty = 1;
+				continue;
+			}
+		}
+		
+		if (Pad_justRepeated(PAD_UP)) {
+			current -= 1;
+			if (current<0) current += app.count;
+			dirty = 1;
+		}
+		else if (Pad_justRepeated(PAD_DOWN)) {
+			current += 1;
+			if (current>=app.count) current -= app.count;
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_RIGHT)) {
+			if (current==app.count-1) current = 0;
+			else {
+				current += rows;
+				if (current>=app.count) current = app.count-1;
+			}
+			dirty = 1;
+		}
+		else if (Pad_justPressed(PAD_LEFT)) {
+			if (current==0) current = app.count-1;
+			else {
+				current -= rows;
+				if (current<0) current = 0;
+			}
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_B)) {
+			archive = 0;
+			break;
+		}
+		
+		if (Pad_justPressed(PAD_A)) {
+			Entry* item = &app.items[current];
+			
+			char shown[MAX_FILE];
+			sprintf(shown, "%s/%s", GAMES_PATH, item->name);
+			char hidden[MAX_FILE];
+			sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
+			
+			char *dst,*src;
+			if (item->hidden) {
+				src = hidden;
+				dst = shown;
+			}
+			else {
+				src = shown;
+				dst = hidden;
+			}
+			
+			if (!exists(dst) && rename(src, dst)==0) {
+				item->hidden = !item->hidden;
+				dirty = 1;
+			}
+		}
+		
+		if (Device_autosleep()) dirty = 1;
+		if (Device_tick()) dirty = 1;
+		
+		if (dirty) {
+			dirty = 0;
+			
+			int snap = current==app.current ? SNAP_CURRENT : SNAP_SAVE;
+			App_focus(current, snap);
+			App_top();
+			
+			XGL_Renderer *renderer = app.xgl.renderers[1];
+			XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
+			XGL_SetRenderDrawColor(renderer, BLACK_TRIAD,0xff);
+			XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+			
+			// calculate viewport
+			if (app.count<=rows) {
+				top = 0;
+			}
+			else {
+				int max = app.count - rows;
+				int bottom = top + rows - 1;
+				if (current<top) top = current;
+				else if (current>bottom) top = current - (rows - 1);
+				if (top<0) top = 0;
+				if (top>max) top = max;
+			}
+			int end = top + rows;
+			if (end>app.count) end = app.count;
+	
+			int x = 0;
+			int y = 0;
+			int h = 40;
+	
+			// draw viewport
+			for (int i=top; i<end; i++) {
+				int row = i - top;
+				int oy = y + row * h;
+		
+				Entry* item = &app.items[i];
+				SDL_Color c = item->hidden ? LIGHT_COLOR : WHITE_COLOR;
+				if (i==current) {
+					AA_rect(renderer, x,oy,SCREEN_WIDTH,h, 0, c);
+					c = BLACK_COLOR;
+				}
+		
+				char name[MAX_FILE];
+				char fit[MAX_FILE];
+				App_getDisplayName(item->name, name);
+				App_trunc(font24, name, SCREEN_WIDTH-40, fit);
+		
+				XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+8,oy+8,24,24});
+				Font_renderText(renderer, font24, fit,	x+40,oy+10, c);
+			}
+			
+			if (app.capture) App_capture("menu");
+			for (int i=0; i<SCREEN_COUNT; i++) {
+				XGL_RenderPresent(app.xgl.renderers[i]);
+			}
+		}
+		else {
+			real_SDL_Delay(16);
+		}
+	}
+	Pad_reset();
+}
+
 static void App_menu(void) {
 	SDL_Log("enter menu");
 	app.menu = 1;
@@ -2888,11 +3026,8 @@ static void App_menu(void) {
 
 	int selected = 0;
 	int dirty = 1;
-	int top = 0;
-	int rows = 19;
 	int in_menu = 1;
 	SDL_Event event;
-	int mode = MODE_MENU;
 	while (in_menu) {
 		while (in_menu && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
@@ -2905,146 +3040,78 @@ static void App_menu(void) {
 			in_menu = 0;
 		}
 		
-		if (mode==MODE_MENU) {
-			if (Pad_justPressed(PAD_UP)) {
-				selected -= 1;
-				dirty = 1;
-			}
-			else if (Pad_justPressed(PAD_DOWN)) {
-				selected += 1;
-				dirty = 1;
-			}
-			
-			if (Pad_justPressed(PAD_RIGHT)) {
+		if (Pad_justPressed(PAD_UP)) {
+			selected -= 1;
+			dirty = 1;
+		}
+		else if (Pad_justPressed(PAD_DOWN)) {
+			selected += 1;
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_RIGHT)) {
+			selected = 0;
+			current = App_next(current, +1);
+			dirty = 1;
+		}
+		else if (Pad_justPressed(PAD_LEFT)) {
+			selected = 0;
+			current = App_next(current, -1);
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_SELECT)) {
+			App_datetime();
+			dirty = 1;
+		}
+		if (Pad_justPressed(PAD_START)) {
+			// TODO: tmp
+			App_bootlogo();
+			dirty = 1;
+		}
+		
+		if (Pad_justPressed(PAD_B)) {
+			if (current!=app.current) {
+				current = app.current;
 				selected = 0;
-				current = App_next(current, +1);
 				dirty = 1;
 			}
-			else if (Pad_justPressed(PAD_LEFT)) {
-				selected = 0;
-				current = App_next(current, -1);
-				dirty = 1;
-			}
-			
-			if (Pad_justPressed(PAD_SELECT)) {
-				App_datetime();
-				dirty = 1;
-			}
-			if (Pad_justPressed(PAD_START)) {
-				// TODO: tmp
-				App_bootlogo();
-				dirty = 1;
-			}
-			
-			if (Pad_justPressed(PAD_B)) {
-				if (current!=app.current) {
-					current = app.current;
-					selected = 0;
-					dirty = 1;
-				}
-				else {
-					in_menu = 0;
-				}
-			}
-			if (Pad_justPressed(PAD_A)) {
-				if (current==app.current) {
-					if (selected==0) { // SAVE
-						App_save();
-					}
-					else if (selected==1) { // LOAD
-						App_load();
-					}
-					else if (selected==2) { // ARCHIVE
-						mode = MODE_ARCHIVE;
-						selected = current;
-						dirty = 1;
-					}
-					else if (selected==3) { // RESET
-						App_reset();
-					}
-					if (mode==MODE_MENU) in_menu = 0;
-				}
-				else {
-					if (selected==0) { // LOAD
-						App_save();
-						App_set(current);
-						Settings_save();
-					
-						drastic_audio_pause(0);
-						puts("[LOAD] resume requested");
-						loader.state = LOADER_REQUESTED;
-						loader.after = LOADER_RESUME;
-					
-						in_menu = 0;
-					}
-					else if (selected==1) { // ARCHIVE
-						mode = MODE_ARCHIVE;
-						selected = current;
-						dirty = 1;
-					}
-				}
+			else {
+				in_menu = 0;
 			}
 		}
-		else if (mode==MODE_ARCHIVE) {
-			if (Pad_justRepeated(PAD_UP)) {
-				current -= 1;
-				if (current<0) current += app.count;
-				dirty = 1;
-			}
-			else if (Pad_justRepeated(PAD_DOWN)) {
-				current += 1;
-				if (current>=app.count) current -= app.count;
-				dirty = 1;
-			}
-			
-			if (Pad_justPressed(PAD_RIGHT)) {
-				if (current==app.count-1) current = 0;
-				else {
-					current += rows;
-					if (current>=app.count) current = app.count-1;
+		if (Pad_justPressed(PAD_A)) {
+			if (current==app.current) {
+				if (selected==0) { // SAVE
+					App_save();
 				}
-				dirty = 1;
-			}
-			else if (Pad_justPressed(PAD_LEFT)) {
-				if (current==0) current = app.count-1;
-				else {
-					current -= rows;
-					if (current<0) current = 0;
+				else if (selected==1) { // LOAD
+					App_load();
 				}
-				dirty = 1;
+				else if (selected==2) { // ARCHIVE
+					App_archive(current);
+					dirty = 1;
+				}
+				else if (selected==3) { // RESET
+					App_reset();
+				}
+				if (selected!=2) in_menu = 0;
 			}
-			
-			if (Pad_justPressed(PAD_B)) {
-				mode = MODE_MENU;
-				dirty = 1;
-				// reusing unused selected to store current
-				// upon entering archive so we can restore
-				// when existing, selected will always
-				// revert to ARCHIVE
-				current = selected;
-				selected = current==app.current ? 2 : 1;
-			}
-			
-			if (Pad_justPressed(PAD_A)) {
-				Entry* item = &app.items[current];
+			else {
+				if (selected==0) { // LOAD
+					App_save();
+					App_set(current);
+					Settings_save();
 				
-				char shown[MAX_FILE];
-				sprintf(shown, "%s/%s", GAMES_PATH, item->name);
-				char hidden[MAX_FILE];
-				sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
+					drastic_audio_pause(0);
+					puts("[LOAD] resume requested");
+					loader.state = LOADER_REQUESTED;
+					loader.after = LOADER_RESUME;
 				
-				char *dst,*src;
-				if (item->hidden) {
-					src = hidden;
-					dst = shown;
+					in_menu = 0;
 				}
-				else {
-					src = shown;
-					dst = hidden;
-				}
-				
-				if (!exists(dst) && rename(src, dst)==0) {
-					item->hidden = !item->hidden;
+				else if (selected==1) { // ARCHIVE
+					App_archive(current);
 					dirty = 1;
 				}
 			}
@@ -3069,10 +3136,8 @@ static void App_menu(void) {
 			}
 			
 			// TODO: BAD this is update logic in render block
-			if (mode==MODE_MENU) {
-				if (selected<0) selected += count;
-				selected %= count;
-			}
+			if (selected<0) selected += count;
+			selected %= count;
 			
 			int snap = selected==3 ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
 			App_focus(current, snap);
@@ -3080,88 +3145,41 @@ static void App_menu(void) {
 			
 			XGL_Renderer *renderer = app.xgl.renderers[1];
 			int x,y,w,h;
-			if (mode==MODE_MENU) {
-				App_bottom();
-				
-				// center in bottom "screen"
-				y = 0;
-				h = SCREEN_HEIGHT;
-	
-				int mw = 0;
-				for (int i=0; i<count; i++) {
-					Font_getTextSize(font24, items[i], &w, NULL);
-					if (w>mw) mw = w;
-				}
-				mw += font24->offset_x;
-				
-				w = 8 + mw + 8;
-				x = (SCREEN_WIDTH - w) / 2;
-	
-				int oh = ((count-1) * 40) + 36;
-				y += (h - oh) / 2;
-				h = oh;
-				oh = 40;
-	
-				AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
-	
-				for (int i=0; i<count; i++) {
-					Font_renderFunc font_renderer = Font_shadowText;
-					SDL_Color color = WHITE_COLOR;
-		
-					if (i==selected) {
-						AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
-						AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
-						font_renderer = Font_renderText;
-						color = DARK_COLOR;
-					}
-		
-					font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
-				}
+			App_bottom();
+			
+			// center in bottom "screen"
+			y = 0;
+			h = SCREEN_HEIGHT;
+
+			int mw = 0;
+			for (int i=0; i<count; i++) {
+				Font_getTextSize(font24, items[i], &w, NULL);
+				if (w>mw) mw = w;
 			}
-			else if (mode==MODE_ARCHIVE) {
-				XGL_SetRenderShader(renderer, app.xgl.shaders[SHADER_NEAREST]);
-				XGL_SetRenderDrawColor(renderer, BLACK_TRIAD,0xff);
-				XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
-				
-				// calculate viewport
-				if (app.count<=rows) {
-					top = 0;
-				}
-				else {
-					int max = app.count - rows;
-					int bottom = top + rows - 1;
-					if (current<top) top = current;
-					else if (current>bottom) top = current - (rows - 1);
-					if (top<0) top = 0;
-					if (top>max) top = max;
-				}
-				int end = top + rows;
-				if (end>app.count) end = app.count;
-		
-				x = 0;
-				y = 0;
-				h = 40;
-		
-				// draw viewport
-				for (int i=top; i<end; i++) {
-					int row = i - top;
-					int oy = y + row * h;
+			mw += font24->offset_x;
 			
-					Entry* item = &app.items[i];
-					SDL_Color c = item->hidden ? LIGHT_COLOR : WHITE_COLOR;
-					if (i==current) {
-						AA_rect(renderer, x,oy,SCREEN_WIDTH,h, 0, c);
-						c = BLACK_COLOR;
-					}
-			
-					char name[MAX_FILE];
-					char fit[MAX_FILE];
-					App_getDisplayName(item->name, name);
-					App_trunc(font24, name, SCREEN_WIDTH-40, fit);
-			
-					XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){item->hidden?24:0,0,24,24}, &(SDL_Rect){x+8,oy+8,24,24});
-					Font_renderText(renderer, font24, fit,	x+40,oy+10, c);
+			w = 8 + mw + 8;
+			x = (SCREEN_WIDTH - w) / 2;
+
+			int oh = ((count-1) * 40) + 36;
+			y += (h - oh) / 2;
+			h = oh;
+			oh = 40;
+
+			AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+
+			for (int i=0; i<count; i++) {
+				Font_renderFunc font_renderer = Font_shadowText;
+				SDL_Color color = WHITE_COLOR;
+
+				if (i==selected) {
+					AA_rect(renderer, x+2,y+(i*oh)+2,w,36, 0, TRIAD_ALPHA(BLACK_TRIAD,0xff));
+					AA_rect(renderer, x,y+(i*oh),w,36, 0, TRIAD_ALPHA(WHITE_TRIAD,0xff));
+					font_renderer = Font_renderText;
+					color = DARK_COLOR;
 				}
+
+				font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
 			}
 			
 			if (app.capture) App_capture("menu");
