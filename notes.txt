@@ -4,6 +4,7 @@ CHANGE LOG
 
 -----------------------------------------------
 
+[x] clean up mic implementation
 [ ] restore non-plus support? (for Sydney)
 [ ] update instructions below for Plus
 

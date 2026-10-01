@@ -40,6 +40,13 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 
 // --------------------------------------------
 
+// yeesh
+#define ATOMIC_GET(what) __atomic_load_n(&(what), __ATOMIC_ACQUIRE)
+#define ATOMIC_GET_RELAXED(what) __atomic_load_n(&(what), __ATOMIC_RELAXED)
+#define ATOMIC_SET(what, value) __atomic_store_n(&(what), (value), __ATOMIC_RELEASE)
+
+// --------------------------------------------
+
 #define CEIL_TO(x, n) (((x) + (n) - 1) / (n) * (n))
 #define NUMBER_OF(items) (sizeof(items) / sizeof((items)[0]))
 #define LOG(...) printf(__VA_ARGS__); printf("\n"); fflush(stdout)
@@ -727,8 +734,8 @@ static void hexdump(const void *ptr, size_t len) {
 #define MIC_SAMPLE_RATE		32768u
 #define MIC_SAMPLE_COUNT	(1u << 15) // 1 second
 #define MIC_SAMPLE_MASK		(MIC_SAMPLE_COUNT - 1)
-#define MIC_SAMPLE_SIZE		2048
-#define MIC_SAMPLE_DRIFT	8192
+#define MIC_SAMPLE_SIZE		256
+#define MIC_SAMPLE_DRIFT	2048
 #define DRASTIC_CLOCK_HZ	67027964ull // from drastic's spu_get_microphone_sample()
 
 static struct {
@@ -758,14 +765,14 @@ static struct {
 };
 
 static void Mic_recordSample(int16_t sample) {
-	uint64_t start_sample = __atomic_load_n(&mic.write_sample, __ATOMIC_RELAXED);
+	uint64_t start_sample = ATOMIC_GET_RELAXED(mic.write_sample);
 	mic.ring[start_sample & MIC_SAMPLE_MASK] = sample;
-	__atomic_store_n(&mic.write_sample, start_sample + 1, __ATOMIC_RELEASE);
+	ATOMIC_SET(mic.write_sample, start_sample + 1);
 }
 static int32_t Mic_getSample(uint64_t timestamp) {
-	if (!__atomic_load_n(&mic.active, __ATOMIC_ACQUIRE)) return 0;
+	if (!ATOMIC_GET(mic.active)) return 0;
 	
-	uint64_t write_sample = __atomic_load_n(&mic.write_sample, __ATOMIC_ACQUIRE);
+	uint64_t write_sample = ATOMIC_GET(mic.write_sample);
 	if (write_sample == 0) return 0;
 
 	if (!mic.session.valid) {
@@ -777,7 +784,6 @@ static int32_t Mic_getSample(uint64_t timestamp) {
 	uint64_t elapsed = timestamp > mic.session.timestamp ? timestamp - mic.session.timestamp : 0;
 	uint64_t offset = elapsed * MIC_SAMPLE_RATE / DRASTIC_CLOCK_HZ;
 	uint64_t start_sample = mic.session.start_sample + offset;
-
 	uint64_t target_sample = write_sample > MIC_SAMPLE_SIZE ? write_sample - MIC_SAMPLE_SIZE : 0;
 	
 	// reanchor after drift
@@ -795,7 +801,7 @@ static int32_t Mic_getSample(uint64_t timestamp) {
 	return mic.ring[start_sample & MIC_SAMPLE_MASK];
 }
 static void* Mic_thread(void* arg) {
-	int16_t buf[512];
+	int16_t buf[64];
 	int running = 1;
 	while (running) {
 		pthread_mutex_lock(&mic.lock);
@@ -812,7 +818,7 @@ static void* Mic_thread(void* arg) {
 		if (!running) break;
 
 		snd_pcm_sframes_t n = snd_pcm_readi(mic.pcm, buf, NUMBER_OF(buf));
-
+		
 		if (n == -EAGAIN) {
 			usleep(1000);
 			continue;
@@ -847,9 +853,10 @@ static void Mic_init(void) {
 	if (mic.running) return;
 	
 	snd_pcm_open(&mic.pcm, "plughw:0,0", SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK);
-	snd_pcm_set_params(mic.pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 1, MIC_SAMPLE_RATE, 1, 100000);
+	snd_pcm_set_params(mic.pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 1, MIC_SAMPLE_RATE, 1, 10000);
 	
 	pthread_mutex_lock(&mic.lock);
+	ATOMIC_SET(mic.active, 1);
 	mic.running = 1;
 	pthread_create(&mic.thread, NULL, Mic_thread, NULL);
 	pthread_mutex_unlock(&mic.lock);
@@ -861,21 +868,34 @@ static void Mic_quit(void) {
 		return;
 	}
 
-	mic.active = 0;
+	ATOMIC_SET(mic.active, 0);
 	mic.running = 0;
 	pthread_cond_signal(&mic.cond);
 	pthread_mutex_unlock(&mic.lock);
 	pthread_join(mic.thread, NULL);
 	snd_pcm_close(mic.pcm);
 	mic.pcm = NULL;
-}
-static void Mic_setActive(int active) {
-	if (active) Mic_init();
-
-	pthread_mutex_lock(&mic.lock);
-	mic.active = active ? 1 : 0;
+	ATOMIC_SET(mic.write_sample, 0);
 	mic.session.valid = 0;
-	pthread_cond_signal(&mic.cond);
+	mic.dc = 0;
+}
+
+static void Mic_pause(int pause) {
+	pthread_mutex_lock(&mic.lock);
+	if (mic.running) {
+		ATOMIC_SET(mic.active, pause ? 0 : 1);
+		mic.session.valid = 0;
+
+		if (pause) {
+			mic.dc = 0;
+		}
+		else {
+			mic.dc = 0;
+			ATOMIC_SET(mic.write_sample, 0);
+		}
+
+		pthread_cond_signal(&mic.cond);
+	}
 	pthread_mutex_unlock(&mic.lock);
 }
 
@@ -949,6 +969,8 @@ static void drastic_await_save(void) {
 static void drastic_load_nds_and_jump(const char* path) {
 	drastic_await_save();
 
+	Mic_quit();
+	
 	drastic_load_nds_t d_load_nds = GET_PFN(app.base + 0x0006fd30); // nm ./drastic | grep load_nds
 	drastic_reset_system_t d_reset_system = GET_PFN(app.base + 0x0000fd50); // nm ./drastic | grep reset_system
 
@@ -989,7 +1011,9 @@ static void drastic_quit(void) {
 }
 
 static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) {
-    return Mic_getSample(timestamp);
+	if (app.fast_forward) return 0;
+	Mic_init();
+	return Mic_getSample(timestamp);
 }
 
 static int compareNatural(const char *a, const char *b) {
@@ -1813,9 +1837,6 @@ static int Device_handleEvent(SDL_Event* event) {
 		if (menu_combo) Pad_consume(PAD_MENU);
 		return menu_combo;
 	}
-	
-	if (Pad_justPressed(PAD_R2)) Mic_setActive(1);
-	if (Pad_justReleased(PAD_R2)) Mic_setActive(0);
 	
 	return 0;
 }
@@ -3571,6 +3592,7 @@ static void App_system(void) {
 static void App_menu(void) {
 	SDL_Log("enter menu");
 	app.menu = 1;
+	Mic_pause(1);
 	Device_mute(1);
 	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
 	
@@ -3773,7 +3795,10 @@ static void App_menu(void) {
 	Pad_reset();
 		
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
-	if (!app.fast_forward && loader.state==LOADER_IDLE) Device_mute(0);
+	if (loader.state==LOADER_IDLE) {
+		if (!app.fast_forward) Device_mute(0);
+		Mic_pause(0);
+	}
 	app.menu = 0;
 	SDL_Log("exit menu");
 }
