@@ -721,6 +721,165 @@ static void hexdump(const void *ptr, size_t len) {
 }
 
 // --------------------------------------------
+// microphone support
+// --------------------------------------------
+
+#define MIC_SAMPLE_RATE		32768u
+#define MIC_SAMPLE_COUNT	(1u << 15) // 1 second
+#define MIC_SAMPLE_MASK		(MIC_SAMPLE_COUNT - 1)
+#define MIC_SAMPLE_SIZE		2048
+#define MIC_SAMPLE_DRIFT	8192
+#define DRASTIC_CLOCK_HZ	67027964ull // from drastic's spu_get_microphone_sample()
+
+static struct {
+	snd_pcm_t *pcm;
+	pthread_t thread;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+
+	int running;
+	int active;
+
+	int16_t ring[MIC_SAMPLE_COUNT];
+	uint64_t write_sample;
+
+	double dc;
+	double gain;
+
+	struct {
+		int valid;
+		uint64_t timestamp;
+		uint64_t start_sample;
+	} session;
+} mic = {
+	.lock = PTHREAD_MUTEX_INITIALIZER,
+	.cond = PTHREAD_COND_INITIALIZER,
+	.gain = 2.0,
+};
+
+static void Mic_recordSample(int16_t sample) {
+	uint64_t start_sample = __atomic_load_n(&mic.write_sample, __ATOMIC_RELAXED);
+	mic.ring[start_sample & MIC_SAMPLE_MASK] = sample;
+	__atomic_store_n(&mic.write_sample, start_sample + 1, __ATOMIC_RELEASE);
+}
+static int32_t Mic_getSample(uint64_t timestamp) {
+	if (!__atomic_load_n(&mic.active, __ATOMIC_ACQUIRE)) return 0;
+	
+	uint64_t write_sample = __atomic_load_n(&mic.write_sample, __ATOMIC_ACQUIRE);
+	if (write_sample == 0) return 0;
+
+	if (!mic.session.valid) {
+		mic.session.valid = 1;
+		mic.session.timestamp = timestamp;
+		mic.session.start_sample = write_sample > MIC_SAMPLE_SIZE ? write_sample - MIC_SAMPLE_SIZE : 0;
+	}
+
+	uint64_t elapsed = timestamp > mic.session.timestamp ? timestamp - mic.session.timestamp : 0;
+	uint64_t offset = elapsed * MIC_SAMPLE_RATE / DRASTIC_CLOCK_HZ;
+	uint64_t start_sample = mic.session.start_sample + offset;
+
+	uint64_t target_sample = write_sample > MIC_SAMPLE_SIZE ? write_sample - MIC_SAMPLE_SIZE : 0;
+	
+	// reanchor after drift
+	if (start_sample >= write_sample) {
+		mic.session.timestamp = timestamp;
+		mic.session.start_sample = target_sample;
+		start_sample = target_sample;
+	}
+	else if (write_sample - start_sample > MIC_SAMPLE_DRIFT) {
+		mic.session.timestamp = timestamp;
+		mic.session.start_sample = target_sample;
+		start_sample = target_sample;
+	}
+
+	return mic.ring[start_sample & MIC_SAMPLE_MASK];
+}
+static void* Mic_thread(void* arg) {
+	int16_t buf[512];
+	int running = 1;
+	while (running) {
+		pthread_mutex_lock(&mic.lock);
+		while (mic.running && !mic.active) {
+			if (mic.pcm) {
+				snd_pcm_drop(mic.pcm);
+				snd_pcm_prepare(mic.pcm);
+			}
+			pthread_cond_wait(&mic.cond, &mic.lock);
+		}
+		running = mic.running;
+		pthread_mutex_unlock(&mic.lock);
+
+		if (!running) break;
+
+		snd_pcm_sframes_t n = snd_pcm_readi(mic.pcm, buf, NUMBER_OF(buf));
+
+		if (n == -EAGAIN) {
+			usleep(1000);
+			continue;
+		}
+		
+		if (n < 0) {
+			int err = snd_pcm_recover(mic.pcm, (int)n, 1);
+			if (err < 0) usleep(5000);
+			continue;
+		}
+		
+		if (n == 0) {
+			usleep(1000);
+			continue;
+		}
+
+		for (snd_pcm_sframes_t i=0; i<n; i++) {
+			double v = buf[i];
+			mic.dc += (v - mic.dc) * 0.005;
+
+			double y = (v - mic.dc) * mic.gain;
+			if (y > 32767.0) y = 32767.0;
+			if (y < -32768.0) y = -32768.0;
+
+			Mic_recordSample((int16_t)y);
+		}
+	}
+	return NULL;
+}
+
+static void Mic_init(void) {
+	if (mic.running) return;
+	
+	snd_pcm_open(&mic.pcm, "plughw:0,0", SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK);
+	snd_pcm_set_params(mic.pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 1, MIC_SAMPLE_RATE, 1, 100000);
+	
+	pthread_mutex_lock(&mic.lock);
+	mic.running = 1;
+	pthread_create(&mic.thread, NULL, Mic_thread, NULL);
+	pthread_mutex_unlock(&mic.lock);
+}
+static void Mic_quit(void) {
+	pthread_mutex_lock(&mic.lock);
+	if (!mic.running) {
+		pthread_mutex_unlock(&mic.lock);
+		return;
+	}
+
+	mic.active = 0;
+	mic.running = 0;
+	pthread_cond_signal(&mic.cond);
+	pthread_mutex_unlock(&mic.lock);
+	pthread_join(mic.thread, NULL);
+	snd_pcm_close(mic.pcm);
+	mic.pcm = NULL;
+}
+static void Mic_setActive(int active) {
+	if (active) Mic_init();
+
+	pthread_mutex_lock(&mic.lock);
+	mic.active = active ? 1 : 0;
+	mic.session.valid = 0;
+	pthread_cond_signal(&mic.cond);
+	pthread_mutex_unlock(&mic.lock);
+}
+
+// --------------------------------------------
 // loading
 // --------------------------------------------
 
@@ -827,6 +986,10 @@ static void drastic_quit(void) {
 	drastic_quit_t d_quit = GET_PFN(app.base + 0x0000e8d0); // nm ./drastic | grep quit
 	void* sys = drastic_var_system();	
 	d_quit(sys);
+}
+
+static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) {
+    return Mic_getSample(timestamp);
 }
 
 static int compareNatural(const char *a, const char *b) {
@@ -1651,6 +1814,9 @@ static int Device_handleEvent(SDL_Event* event) {
 		return menu_combo;
 	}
 	
+	if (Pad_justPressed(PAD_R2)) Mic_setActive(1);
+	if (Pad_justReleased(PAD_R2)) Mic_setActive(0);
+	
 	return 0;
 }
 
@@ -2364,6 +2530,8 @@ static void App_quit(void) {
 	}
 	
 	XGL_Quit();
+	
+	Mic_quit();
 
 	Settings_save();
 	raw_quit();
@@ -3980,6 +4148,21 @@ static inline uintptr_t find_exe_base(void) {
 	dl_iterate_phdr(pick_main, &base);
 	return base;
 }
+static void patch_absolute_jump(void *target, void *replacement) {
+    uint32_t patch[4];
+
+    patch[0] = 0x58000050;
+    patch[1] = 0xd61f0200;
+    memcpy(&patch[2], &replacement, sizeof(replacement));
+
+    size_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t page = (uintptr_t)target & ~(page_size - 1);
+
+    mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    memcpy(target, patch, sizeof(patch));
+    __builtin___clear_cache((char *)target, (char *)target + sizeof(patch));
+    mprotect((void *)page, page_size, PROT_READ | PROT_EXEC);
+}
 
 static void resolve_real(void) {
 	// hook glibc? functions
@@ -4019,6 +4202,10 @@ static void resolve_real(void) {
 	real_SDL_Delay = dlsym(RTLD_NEXT, "SDL_Delay");
 	
 	app.base = find_exe_base();
+	
+	// patch drastic functions
+	void *target = (uint8_t *)app.base + 0x6c7a0;
+	patch_absolute_jump(target, drastic_spu_get_microphone_sample);
 	
 	printf("resolved real function pointers\n"); fflush(stdout);
 }

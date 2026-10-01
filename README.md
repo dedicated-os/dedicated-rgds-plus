@@ -23,13 +23,13 @@ That's it. You can [grab the latest version here](https://github.com/dedicated-o
 
 ## Usage
 
+L2 simulates closing the lid. R2 simulates the mic.
+
 Press the Anbernic/MENU button to open the in-game menu where you can save, load, and reset the current game or switch to and load or reset a different game. 
 
 Press MENU again to open the system menu where you can manage your archive and set the date, time, and timezone.
 
 <img width=256 src="github/dedicated-datetime.png" title=Datetime /> <img width=256 src="github/dedicated-timezone.png" title=Timezone /> 
-
-L2 simulates closing the lid. R2 simulates the mic.
 
 ## Original RG DS Support
 

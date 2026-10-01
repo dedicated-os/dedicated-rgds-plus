@@ -4,7 +4,10 @@ CHANGE LOG
 
 -----------------------------------------------
 
-[/] increase type size 1.5x
+[ ] restore non-plus support? (for Sydney)
+[ ] update instructions below for Plus
+
+[/] increase type/icon size 1.5x
 [ ] delete non-plus releases
 
 -----------------------------------------------
