@@ -1611,6 +1611,47 @@ static int App_status(void);
 static void TimeZone_quit(void);
 
 // --------------------------------------------
+// on-screen display
+// --------------------------------------------
+
+static void OSD_set(OSDMode osd) {
+	app.osd = osd;
+	osd_at = SDL_GetTicks();
+}
+static int OSD_update(void) {
+	if (app.osd==OSD_NONE) return 0;
+	if (osd_at+1000>=SDL_GetTicks()) return 0;
+	app.osd = OSD_NONE;
+	return 1;
+}
+static void OSD_draw(XGL_Renderer *renderer, char* label, int value, int max) {
+	if (!app.xgl.meters || !app.xgl.notches) return;
+	
+	int x,y,w,h;
+	w = 252;
+	h = 64;
+	x = (SCREEN_WIDTH - w) / 2;
+	y = (SCREEN_HEIGHT - h) - 20;
+	
+	int oy = max==10 ? 0 : h;
+	XGL_RenderCopy(renderer, app.xgl.meters, &(SDL_Rect){0,oy,w,h}, &(SDL_Rect){x,y,w,h});
+	
+	Font_shadowText(renderer, font16, label, x+8, y+8, app.menu ? LIGHT_COLOR : WHITE_COLOR);
+	
+	if (value<=0) return;
+	
+	oy = max==10 ? 0 : 30;
+	int no = max==10 ? 24 : 12;
+	int nw = value * no;
+	int nh = 30;
+	XGL_RenderCopy(renderer, app.xgl.notches, &(SDL_Rect){0,oy,nw,nh}, &(SDL_Rect){x+8,y+28,nw,nh});
+}
+static void OSD_render(XGL_Renderer *renderer) {
+	if (app.osd==OSD_VOLUME) OSD_draw(renderer, "VOLUME", settings.volume, 20);
+	else if (app.osd==OSD_BRIGHTNESS) OSD_draw(renderer, "BRIGHTNESS", settings.brightness, 10);
+}
+
+// --------------------------------------------
 // device features
 // --------------------------------------------
 #define AWAKE_TIMEOUT (30 * 1000) // thirty seconds
@@ -1619,18 +1660,6 @@ static void TimeZone_quit(void);
 #define POWER_TIMEOUT 1000 // one second
 static int awake_at = 0;
 static int power_at = 0;
-
-static void OSD_set(OSDMode osd) {
-	app.osd = osd;
-	osd_at = SDL_GetTicks();
-}
-
-static int OSD_update(void) {
-	if (app.osd==OSD_NONE) return 0;
-	if (osd_at+1000>=SDL_GetTicks()) return 0;
-	app.osd = OSD_NONE;
-	return 1;
-}
 
 static void Device_mute(int mute) {
 	if (mute) raw_mute();
@@ -2210,32 +2239,6 @@ static void App_battery(XGL_Renderer *renderer, int battery, int is_charging, in
 		AA_bolt(renderer, x+2,y+2,BLACK_COLOR);
 		AA_bolt(renderer, x,y,c);
 	}
-}
-static void OSD_draw(XGL_Renderer *renderer, char* label, int value, int max) {
-	if (!app.xgl.meters || !app.xgl.notches) return;
-	
-	int x,y,w,h;
-	w = 252;
-	h = 64;
-	x = (SCREEN_WIDTH - w) / 2;
-	y = (SCREEN_HEIGHT - h) - 20;
-	
-	int oy = max==10 ? 0 : h;
-	XGL_RenderCopy(renderer, app.xgl.meters, &(SDL_Rect){0,oy,w,h}, &(SDL_Rect){x,y,w,h});
-	
-	Font_shadowText(renderer, font16, label, x+8, y+8, app.menu ? LIGHT_COLOR : WHITE_COLOR);
-	
-	if (value<=0) return;
-	
-	oy = max==10 ? 0 : 30;
-	int no = max==10 ? 24 : 12;
-	int nw = value * no;
-	int nh = 30;
-	XGL_RenderCopy(renderer, app.xgl.notches, &(SDL_Rect){0,oy,nw,nh}, &(SDL_Rect){x+8,y+28,nw,nh});
-}
-static void OSD_render(XGL_Renderer *renderer) {
-	if (app.osd==OSD_VOLUME) OSD_draw(renderer, "VOLUME", settings.volume, 20);
-	else if (app.osd==OSD_BRIGHTNESS) OSD_draw(renderer, "BRIGHTNESS", settings.brightness, 10);
 }
 
 static int App_status(void) {
