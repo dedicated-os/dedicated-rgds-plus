@@ -104,10 +104,10 @@ static const char *XGL_default_fragment_shader =
 	"}";
 
 // still biased vertically but more dot-like
-// X424
-// 6202
-// 4000
-// 6202
+// X313
+// 8101
+// 5000
+// 8101
 static const char *XGL_grid_fragment_shader =
 	"precision mediump float;"
 	"varying vec2 v_texcoord;"
@@ -118,13 +118,13 @@ static const char *XGL_grid_fragment_shader =
 		"vec2 g = mod(gl_FragCoord.xy, 4.0);"
 		"float shade = 1.0;"
 		"if (g.y >= 3.0) {"
-			"shade = g.x < 1.0 ? 0.0 : (g.x < 2.0 ? 0.6 : (g.x < 3.0 ? 0.8 : 0.6));"
+			"shade = g.x < 1.0 ? 0.0 : (g.x < 2.0 ? 0.7 : (g.x < 3.0 ? 0.9 : 0.7));"
 		"} else if (g.y >= 2.0) {"
-			"shade = g.x < 1.0 ? 0.4 : (g.x < 2.0 ? 0.8 : (g.x < 3.0 ? 1.0 : 0.8));"
+			"shade = g.x < 1.0 ? 0.2 : (g.x < 2.0 ? 0.9 : (g.x < 3.0 ? 1.0 : 0.9));"
 		"} else if (g.y >= 1.0) {"
-			"shade = g.x < 1.0 ? 0.6 : 1.0;"
+			"shade = g.x < 1.0 ? 0.5 : 1.0;"
 		"} else {"
-			"shade = g.x < 1.0 ? 0.4 : (g.x < 2.0 ? 0.8 : (g.x < 3.0 ? 1.0 : 0.8));"
+			"shade = g.x < 1.0 ? 0.2 : (g.x < 2.0 ? 0.9 : (g.x < 3.0 ? 1.0 : 0.9));"
 		"}"
 		"color.rgb *= shade;"
 		"gl_FragColor = color;"
