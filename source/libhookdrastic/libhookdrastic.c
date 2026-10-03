@@ -142,6 +142,8 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define SCAN_BACK	14
 #define SCAN_POWER	102
 
+#define KEY_LID		'l'
+
 // --------------------------------------------
 
 typedef enum {
@@ -1657,9 +1659,24 @@ static void OSD_render(XGL_Renderer *renderer) {
 #define AWAKE_TIMEOUT (30 * 1000) // thirty seconds
 #define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes
 #define WAKE_DEFER 250 // quarter of a second
+#define POWEROFF_TIMEOUT 2 * 60 * 1000 // two minutes
 #define POWER_TIMEOUT 1000 // one second
 static int awake_at = 0;
 static int power_at = 0;
+static int idling = 0;
+static int deidle = 0;
+static int idle_at = 0;
+
+static int hangs_on_lid(void) {
+	uint32_t game_code = *(volatile uint32_t *)((uint8_t *)drastic_var_system() + 0xc58);
+	switch (game_code) {
+		case 0x454a5242: // BRJE Radiant Historia US
+		case 0x45484942: // BIHE Monster Tale US
+		case 0x4a4b3242: // B2KJ Ni no Kuni JP
+			return 1;
+	}
+	return 0;
+}
 
 static void Device_mute(int mute) {
 	if (mute) raw_mute();
@@ -1667,6 +1684,67 @@ static void Device_mute(int mute) {
 	
 	if (raw.jack) raw_spk(0);
 	else raw_spk(!mute);
+}
+
+static void emitKeyEvent(int key, int press) {
+	SDL_Event event = {0};
+	
+	event.type = event.key.type = press ? SDL_KEYDOWN : SDL_KEYUP;
+	event.key.state = press ? SDL_PRESSED : SDL_RELEASED;
+	event.key.repeat = 0;
+	event.key.keysym.sym = key;
+	event.key.timestamp = SDL_GetTicks();
+	
+	SDL_PushEvent(&event);
+}
+
+static void Device_idle(void) {
+	// enter
+	emitKeyEvent(KEY_LID, 1);
+	
+	raw_bri(0);
+	raw_led(1);
+	// raw_scr(0); // causes audio lag
+
+	Settings_save();
+	App_save();
+
+	idle_at = SDL_GetTicks();
+	idling = 1;
+	deidle = 0;
+}
+static void Device_idling(void) {
+	// exit
+	if (Pad_justPressed(PAD_OPEN)) {
+		emitKeyEvent(KEY_LID, 0);
+		deidle = 3;
+	}
+	
+	// a few frames after exit (basically till drastic/game draws again)
+	if (deidle>0) {
+		deidle -= 1;
+		if (deidle==0) {
+			// raw_scr(1); // causes audio lag
+			raw_led(0);
+			Settings_setBrightness(settings.brightness);
+			idling = 0;
+			return;
+		}
+	}
+	
+	// every frame while idling
+	if (SDL_GetTicks()>=idle_at+POWEROFF_TIMEOUT) {
+		int is_charging = getInt(app.usb);
+		if (is_charging) {
+			idle_at = SDL_GetTicks(); // keep on
+		}
+		else {
+			raw_mute();
+			drastic_audio_pause(1);
+			unlink("/tmp/exec_loop");
+			drastic_quit();
+		}
+	}
 }
 static void Device_sleep(void) {
 	raw_mute();
@@ -1682,7 +1760,6 @@ static void Device_sleep(void) {
 	
 	int was_closed = getInt(app.lid)==2;
 	
-	#define POWEROFF_TIMEOUT 2 * 60 * 1000 // two minutes
 	int slept_at = SDL_GetTicks();
 	int asleep = 1;
 	SDL_Event event;
@@ -1766,6 +1843,8 @@ static void Device_poweroff(void) {
 static int Device_tick(void) {
 	raw_poll();
 	
+	if (idling) Device_idling();
+	
 	int dirty = 0;
 	// must be called outside of Device_handleEvent because
 	// the power key doesn't fire repeat events so otherwise
@@ -1814,9 +1893,16 @@ static int Device_tick(void) {
 }
 static int Device_handleEvent(SDL_Event* event) {
 	if (Pad_justPressed(PAD_CLOSE)) {
-		Device_sleep();
-		return 1;
+		if (app.menu || hangs_on_lid()) {
+			Device_sleep();
+			return 1;
+		}
+		else {
+			Device_idle();
+			return 0;
+		}
 	}
+	
 	if (Pad_justPressed(PAD_POWER)) {
 		power_at = SDL_GetTicks();
 		return 1;
