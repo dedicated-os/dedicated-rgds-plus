@@ -1,22 +1,26 @@
 CHANGE LOG
 
-- initial RG DS Plus support
+- initial release
 
 -----------------------------------------------
 
 [x] clean up mic implementation
-[ ] restore non-plus support? (for Sydney)
-[ ] update instructions below for Plus
-[ ] look into lcd_sabpixel.zip for 4xlcd + color balance
-[ ] reduce initial brightness
-	replace
-		default-brightness-level = <0xc8>;
-	with
-		default-brightness-level = <0x28>;
-
-[/] increase type/icon size 1.5x
-[ ] delete non-plus releases
 [x] look into lag that is fixed by fast forwarding
+[x] add grid shader
+[x] add settings.grid toggle (MENU+L2)
+	add to hints?
+[x] fixed issue where volume never hit zero
+[ ] stutter when leaving menu/ff
+	add a 200ms cooldown before unmuting?
+	hook into audio queue
+[ ] add color calibration shader?
+[ ] restore non-plus support?
+	for Sydney
+	she didn't immediately latch onto Nintendogs like I thought she would
+	so maybe not
+[/] increase type/icon size 1.5x
+[ ] update instructions below for Plus
+[ ] delete non-plus releases?
 
 -----------------------------------------------
 

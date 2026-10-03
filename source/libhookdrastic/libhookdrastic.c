@@ -157,6 +157,13 @@ typedef struct {
 	int hidden;
 } Entry;
 
+typedef enum {
+	SHADER_NEAR,
+	SHADER_GRID,
+
+	SHADER_COUNT
+} Shader;
+
 static struct {
 	uintptr_t base;
 	
@@ -171,6 +178,8 @@ static struct {
 		XGL_Texture *icons;
 		XGL_Texture *meters;
 		XGL_Texture *notches;
+		XGL_Shader *near;
+		XGL_Shader *grid;
 	} xgl;
 	
 	SDL_Rect rects[SCREEN_COUNT];
@@ -507,12 +516,14 @@ static struct {
 	int version;
 	int volume;		// 0-20
 	int brightness;	// 0 - 10
-	int unused[5];
+	int grid;
+	int unused[4];
 	char game[MAX_PATH];
 } settings = {
 	.version = 1,
-	.volume = 6,
-	.brightness = 3,
+	.volume = 10,
+	.brightness = 5,
+	.grid = 1,
 };
 
 #define SETTINGS_PATH USERDATA_PATH "/settings.bin"
@@ -1938,6 +1949,13 @@ static int Device_handleEvent(SDL_Event* event) {
 	}
 	
 	if (Pad_isPressed(PAD_MENU)) {
+		if (Pad_justPressed(PAD_L2)) {
+			Pad_consume(PAD_L2);
+			settings.grid = !settings.grid;
+			menu_combo = 1;
+			return 1;
+		}
+		
 		if (Pad_justPressed(PAD_START)) {
 			Pad_consume(PAD_START);
 			app.capture = 1;
@@ -2382,9 +2400,10 @@ static void App_focus(int current, int snap) {
 
 static void App_background(int screen) {
 	XGL_Renderer *renderer = app.xgl.renderers[screen];
-	
+	if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 	XGL_RenderCopy(renderer, app.xgl.previews[screen], NULL, NULL);
 	XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,screen*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
+	if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
 }
 
 static void App_top(int hud) {
@@ -2612,6 +2631,9 @@ static void App_init(void) {
 	app.xgl.meters = XGL_LoadTexture(renderer, ASSETS_PATH "/meters.png");
 	app.xgl.notches = XGL_LoadTexture(renderer, ASSETS_PATH "/notches.png");
 	
+	app.xgl.near = XGL_GetDefaultTextureShader(renderer);
+	app.xgl.grid = XGL_CreateGridShader(renderer);
+	
 	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
 
 	app.bat = open(BAT_PATH "capacity", O_RDONLY);
@@ -2635,6 +2657,9 @@ static void App_quit(void) {
 	if (app.xgl.overlay) 	XGL_DestroyTexture(app.xgl.overlay);
 	if (app.xgl.previews[0]) XGL_DestroyTexture(app.xgl.previews[0]);
 	if (app.xgl.previews[1]) XGL_DestroyTexture(app.xgl.previews[1]);
+	
+	// XGL_DestroyShader(app.xgl.near);
+	XGL_DestroyShader(app.xgl.grid);
 	
 	close(app.bat);
 	close(app.usb);
@@ -3418,11 +3443,12 @@ static void App_extra(void) {
 		int w = 1; // we can just stretch horizontally on the GPU
 		int h = SCREEN_HEIGHT * 2;
 		tmp = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
-
+		
+		int o = -16; // brighten (for shaders)
 		uint32_t* d = tmp->pixels;
 		int total = w * h;
 		for (int i=0; i<total; i++,d++) {
-			*d = (64 + ((total - i) * 160 / total)) << 24; // 87.5% to 25%
+			*d = ((64 + o) + ((total - i) * (160 + o) / total)) << 24; // 87.5% to 25%
 		}
 
 		app.xgl.overlay = XGL_CreateTextureFromSurface(app.xgl.renderers[0], tmp);
@@ -3924,7 +3950,9 @@ static void App_render(void) {
 	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
 		
 		if (i==0) {
 			OSD_render(renderer);

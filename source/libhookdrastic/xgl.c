@@ -103,6 +103,29 @@ static const char *XGL_default_fragment_shader =
 		"gl_FragColor = texture2D(u_texture, v_texcoord) * u_color;"
 	"}";
 
+// biased vertically like my personal DS Lite
+// 8222
+// 63..
+// 63..
+// 63..
+static const char *XGL_grid_fragment_shader =
+	"precision mediump float;"
+	"varying vec2 v_texcoord;"
+	"uniform sampler2D u_texture;"
+	"uniform vec4 u_color;"
+	"void main() {"
+		"vec4 color = texture2D(u_texture, v_texcoord) * u_color;"
+		"vec2 g = mod(gl_FragCoord.xy, 4.0);"
+		"float shade = 1.0;"
+		"if (g.y < 1.0) {"
+			"shade = g.x < 1.0 ? 0.2 : 0.8;"
+		"} else {"
+			"shade = g.x < 1.0 ? 0.3 : (g.x < 2.0 ? 0.6 : 1.0);"
+		"}"
+		"color.rgb *= shade;"
+		"gl_FragColor = color;"
+	"}";
+
 // based on: https://github.com/Woohyun-Kang/Sharp-Shimmerless-Shader/blob/main/shaders_glsl/shaders/sharp-shimmerless.glsl
 static const char *XGL_sharp_vertex_shader =
 	"attribute vec2 a_position;"
@@ -294,6 +317,10 @@ XGL_Shader *XGL_CreateSharpShader(XGL_Renderer *renderer) {
 		shader->linear_filter = SDL_TRUE;
 	}
 	return shader;
+}
+
+XGL_Shader *XGL_CreateGridShader(XGL_Renderer *renderer) {
+	return XGL_CreateShader(renderer, XGL_default_vertex_shader, XGL_grid_fragment_shader);
 }
 
 static void XGL_DestroyShaderInternal(XGL_Shader *shader, int internal) {
