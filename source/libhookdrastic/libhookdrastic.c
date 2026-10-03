@@ -982,6 +982,7 @@ static int drastic_fast_forward(void) {
 	uint8_t *sys = drastic_var_system();
 	return *(volatile uint32_t *)(sys + 0x00085a04) != 0;
 }
+
 static inline int drastic_is_saving(void) {
 	const volatile uint32_t *busy = (const volatile uint32_t *)(app.base + 0x3ec27c);
 	return __atomic_load_n(busy, __ATOMIC_ACQUIRE)!=0;
@@ -990,6 +991,7 @@ static void drastic_await_save(void) {
 	while (drastic_is_saving()) real_SDL_Delay(1);
 	sync();
 }
+
 static void drastic_load_nds_and_jump(const char* path) {
 	drastic_await_save();
 
@@ -4127,9 +4129,32 @@ int SDL_PollEvent(SDL_Event* event) {
 	}
 }
 
+static struct {
+	void (*callback)(void *, Uint8 *, int);
+	void *userdata;
+} audio;
+static void Audio_callback(void *userdata, Uint8 *stream, int len) {
+	(void)userdata;
+	
+	if (app.menu) {
+		SDL_memset(stream, 0, len);
+		return;
+	}
+	
+	if (audio.callback) audio.callback(audio.userdata, stream, len);
+	else SDL_memset(stream, 0, len);
+}
+
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
 	raw_mute();
-	int result = real_SDL_OpenAudio(desired, obtained);
+	
+	SDL_AudioSpec spec = *desired;
+	audio.callback = desired->callback;
+	audio.userdata = desired->userdata;
+	spec.callback = Audio_callback;
+	spec.userdata = NULL;
+	
+	int result = real_SDL_OpenAudio(&spec, obtained);
 	Settings_setVolume(settings.volume); // must be done here (or later)
 	return result;
 }

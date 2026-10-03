@@ -10,9 +10,8 @@ CHANGE LOG
 [x] add settings.grid toggle (MENU+L2)
 	add to hints?
 [x] fixed issue where volume never hit zero
-[ ] stutter when leaving menu/ff
-	add a 200ms cooldown before unmuting?
-	hook into audio queue
+[x] stutter when leaving menu
+[ ] stutter when leaving ff
 [ ] add color calibration shader?
 [ ] restore non-plus support?
 	for Sydney
