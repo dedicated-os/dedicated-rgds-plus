@@ -199,7 +199,6 @@ static struct {
 	int menu;
 	int osd;
 	int capture;
-	int fast_forward;
 } app;
 
 static struct {
@@ -403,6 +402,7 @@ static void raw_spk(int enable) {
     snd_mixer_selem_set_enum_item(raw.spk.swi0, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
     snd_mixer_selem_set_enum_item(raw.spk.swi1, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
 }
+static int drastic_fast_forward(void); // oof
 static void raw_poll(void) {
     static uint32_t next = 0;
 
@@ -414,7 +414,7 @@ static void raw_poll(void) {
     if (jack == raw.jack) return;
 
     raw.jack = jack;
-    if (!app.fast_forward) raw_spk(!jack);
+    if (!drastic_fast_forward()) raw_spk(!jack);
 }
 
 static void raw_vol(int value) { // 0-20, not really raw anymore
@@ -967,6 +967,10 @@ static void drastic_audio_reset_buffer(void) {
 	drastic_audio_reset_buffer(audio);
 }
 
+static int drastic_fast_forward(void) {
+	uint8_t *sys = drastic_var_system();
+	return *(volatile uint32_t *)(sys + 0x00085a04) != 0;
+}
 static inline int drastic_is_saving(void) {
 	const volatile uint32_t *busy = (const volatile uint32_t *)(app.base + 0x3ec27c);
 	return __atomic_load_n(busy, __ATOMIC_ACQUIRE)!=0;
@@ -1020,7 +1024,7 @@ static void drastic_quit(void) {
 }
 
 static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) {
-	if (app.fast_forward) return 0;
+	if (drastic_fast_forward()) return 0;
 	Mic_init();
 	return Mic_getSample(timestamp);
 }
@@ -1895,6 +1899,13 @@ static int Device_tick(void) {
 	
 	if (OSD_update()) dirty = 1;
 	if (App_status()) dirty = 1;
+	
+	static int last_ff = 0;
+	int ff = drastic_fast_forward();
+	if (ff != last_ff) {
+		last_ff = ff;
+		Device_mute(ff);
+	}
 	
 	Pad_nextFrame();
 	return dirty;
@@ -3894,7 +3905,7 @@ static void App_menu(void) {
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
 		drastic_resync();
-		if (!app.fast_forward) Device_mute(0);
+		if (!drastic_fast_forward()) Device_mute(0);
 		Mic_pause(0);
 	}
 	app.menu = 0;
@@ -3918,7 +3929,7 @@ static void App_render(void) {
 		if (i==0) {
 			OSD_render(renderer);
 
-			if (app.fast_forward) {
+			if (drastic_fast_forward()) {
 				if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
 				XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){48,0,24,24}, &(SDL_Rect){4,4,24,24});
 			}
@@ -4066,9 +4077,9 @@ int SDL_PollEvent(SDL_Event* event) {
 
 		if (Pad_justPressed(PAD_BACK)) {
 			Pad_consume(PAD_BACK);
-			app.fast_forward = !app.fast_forward;
-			if (app.fast_forward) Device_mute(1);
-			else Device_mute(0);
+			// app.fast_forward = !app.fast_forward;
+			// if (!drastic_fast_forward()) Device_mute(1);
+			// else Device_mute(0);
 		}
 		
 		// LOG_event(event);
