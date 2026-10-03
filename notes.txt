@@ -7,17 +7,16 @@ CHANGE LOG
 [x] clean up mic implementation
 [ ] restore non-plus support? (for Sydney)
 [ ] update instructions below for Plus
+[ ] look into lcd_sabpixel.zip for 4xlcd + color balance
+[ ] reduce initial brightness
+	replace
+		default-brightness-level = <0xc8>;
+	with
+		default-brightness-level = <0x28>;
 
 [/] increase type/icon size 1.5x
 [ ] delete non-plus releases
-[ ] look into lag that is fixed by fast forwarding
-
------------------------------------------------
-
-games that hang/freeze on or after lid close
-- monster tales
-- ni no kuni (fan translation only?)
-- radiant historia
+[x] look into lag that is fixed by fast forwarding
 
 -----------------------------------------------
 

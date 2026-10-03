@@ -942,6 +942,10 @@ typedef void (*drastic_audio_revert_t)(void *);
 static inline void* drastic_var_system(void) {
 	return PTR_AT(app.base + 0x15ff30); // follow arg in Cutter
 }
+static void drastic_resync(void) {
+	uint8_t *sys = drastic_var_system();
+	*(volatile uint8_t *)(sys + 0x3b2a9a3) = 1;
+}
 static void drastic_audio_pause(int flag) {
 	// not sure this is necessary but
 	// it feels like good hygiene?
@@ -1797,6 +1801,7 @@ static void Device_sleep(void) {
 	}
 
 	drastic_audio_pause(0);
+	drastic_resync();
 	
 	raw_scr(1);
 	raw_led(0);
@@ -3885,6 +3890,7 @@ static void App_menu(void) {
 		
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
+		drastic_resync();
 		if (!app.fast_forward) Device_mute(0);
 		Mic_pause(0);
 	}
