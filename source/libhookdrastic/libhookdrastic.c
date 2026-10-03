@@ -443,7 +443,7 @@ static void raw_vol(int value) { // 0-20, not really raw anymore
 	};
 	
 	static const uint16_t spk_raw[21] = {
-	    1024, // mute
+	    1023, // mute
 	     512, // 512
 		 480, // 32
 		 448, // 32
@@ -937,7 +937,8 @@ typedef int32_t (*drastic_save_state_t)(void *, const char *, char *, uint16_t *
 typedef int32_t (*drastic_load_nds_t)(void *, const char *);
 typedef uint8_t (*drastic_audio_pause_t)(void *);
 typedef void (*drastic_audio_unpause_t)(void *);
-typedef void (*drastic_audio_revert_t)(void *);
+typedef void (*drastic_audio_revert_t)(void *, uint8_t);
+typedef void (*drastic_audio_reset_buffer_t)(void *);
 
 static inline void* drastic_var_system(void) {
 	return PTR_AT(app.base + 0x15ff30); // follow arg in Cutter
@@ -946,24 +947,26 @@ static void drastic_resync(void) {
 	uint8_t *sys = drastic_var_system();
 	*(volatile uint8_t *)(sys + 0x3b2a9a3) = 1;
 }
+static uint8_t drastic_audio_pause_state;
 static void drastic_audio_pause(int flag) {
-	// not sure this is necessary but
-	// it feels like good hygiene?
-	void* sys = drastic_var_system();
-	void* audio = (uint8_t *)sys + 0x1587000;
+	void* audio = (uint8_t *)drastic_var_system() + 0x1587000;
 	
 	if (flag) {
-		drastic_audio_pause_t drastic_audio_pause = GET_PFN(app.base + 0x0008caa0);
-		drastic_audio_pause(audio);
+		drastic_audio_pause_t pause = GET_PFN(app.base + 0x0008caa0);
+		drastic_audio_pause_state = pause(audio);
 	}
 	else {
-		drastic_audio_unpause_t drastic_audio_unpause = GET_PFN(app.base + 0x0008caf0);
-		drastic_audio_unpause(audio);
-		// TODO: this seems to cause hangs
-		// drastic_audio_revert_t drastic_audio_revert = GET_PFN(app.base + 0x000886a0);
-		// drastic_audio_revert(audio);
+		drastic_audio_revert_t revert = GET_PFN(app.base + 0x000886a0);
+		revert(audio, drastic_audio_pause_state);
 	}
 }
+static void drastic_audio_reset_buffer(void) {
+	void* sys = drastic_var_system();
+	void* audio = (uint8_t *)sys + 0x1587000;
+	drastic_audio_reset_buffer_t drastic_audio_reset_buffer = GET_PFN(app.base + 0x00088620);
+	drastic_audio_reset_buffer(audio);
+}
+
 static inline int drastic_is_saving(void) {
 	const volatile uint32_t *busy = (const volatile uint32_t *)(app.base + 0x3ec27c);
 	return __atomic_load_n(busy, __ATOMIC_ACQUIRE)!=0;
@@ -3887,7 +3890,7 @@ static void App_menu(void) {
 	}
 	
 	Pad_reset();
-		
+	
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
 		drastic_resync();
@@ -3912,17 +3915,17 @@ static void App_render(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 		XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
 		
-			if (i==0) {
-				OSD_render(renderer);
+		if (i==0) {
+			OSD_render(renderer);
 
-				if (app.fast_forward) {
-					if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
-					XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){48,0,24,24}, &(SDL_Rect){4,4,24,24});
-				}
+			if (app.fast_forward) {
+				if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
+				XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){48,0,24,24}, &(SDL_Rect){4,4,24,24});
 			}
 		}
+	}
 
-		if (app.capture) App_capture("game");
+	if (app.capture) App_capture("game");
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_RenderPresent(app.xgl.renderers[i]);
 	}
