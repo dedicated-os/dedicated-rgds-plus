@@ -11,6 +11,7 @@ CHANGE LOG
 	add to hints?
 [x] fixed issue where volume never hit zero
 [x] stutter when leaving menu
+[x] properly sort roman numerals
 [ ] stutter when leaving ff
 [ ] add color calibration shader?
 [ ] restore non-plus support?

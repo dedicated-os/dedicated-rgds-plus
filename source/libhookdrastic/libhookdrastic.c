@@ -1042,35 +1042,101 @@ static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) 
 	return Mic_getSample(timestamp);
 }
 
-static int compareNatural(const char *a, const char *b) {
-	while (*a && *b) {
-		// ensure "Game 10.ext" sorts after "Game 2.ext"
-		if (isdigit(*a) && isdigit(*b)) {
-			char *ea, *eb;
-			long na = strtol(a, &ea, 10);
-			long nb = strtol(b, &eb, 10);
-			
-			if (na!=nb) return (na<nb) ? -1 : 1;
+// --------------------------------------------
 
-			a = ea;
-			b = eb;
-		} else {
-			int ca = tolower(*a);
-			int cb = tolower(*b);
-			
-			if (ca!=cb) {
-				// special case: treat '.' as less than ' '
-				// ensure "Game.ext" sorts before "Game 2.ext"
-				if (ca=='.' && cb==' ') return -1;
-				if (ca==' ' && cb=='.') return  1;
-				return ca - cb;
-			}
-			
-			a++;
-			b++;
-		}
+typedef struct {
+	int valid;
+	unsigned long long value;
+	const char *end;
+} NumberString;
+
+static NumberString getNumberString(const char *s, const char *start) {
+	NumberString n = {0, 0, s};
+
+	// Arabic numeral
+	if (isdigit((unsigned char)*s)) {
+		n.valid = 1;
+
+		do {
+			n.value = n.value * 10 + (*s - '0');
+			s++;
+		} while (isdigit((unsigned char)*s));
+
+		n.end = s;
+		return n;
 	}
-	return tolower(*a) - tolower(*b);
+
+	// Roman numerals must begin a space-separated token
+	if (s!=start && s[-1]!=' ') return n;
+
+	const char *p = s;
+	int prev = 0;
+
+	while (*p && *p!=' ' && *p!='.') {
+		int v;
+
+		switch (toupper((unsigned char)*p)) {
+			case 'I': v = 1;  break;
+			case 'V': v = 5;  break;
+			case 'X': v = 10; break;
+			default: return n;
+		}
+
+		if (v>prev) n.value += v - 2*prev;
+		else n.value += v;
+
+		prev = v;
+		p++;
+	}
+
+	if (p==s) return n;
+
+	n.valid = 1;
+	n.end = p;
+	return n;
+}
+
+static int compareNatural(const char *a, const char *b) {
+	const char *startA = a;
+	const char *startB = b;
+
+	while (*a && *b) {
+		NumberString na = getNumberString(a, startA);
+		NumberString nb = getNumberString(b, startB);
+
+		if (na.valid || nb.valid) {
+			if (na.valid && nb.valid) {
+				if (na.value!=nb.value)
+					return na.value<nb.value ? -1 : 1;
+
+				a = na.end;
+				b = nb.end;
+				continue;
+			}
+
+			// NumberString sort where digits normally would,
+			// after punctuation/space, before letters
+			if (na.valid)
+				return '0'<tolower((unsigned char)*b) ? -1 : 1;
+			else
+				return tolower((unsigned char)*a)<'0' ? -1 : 1;
+		}
+
+		int ca = tolower((unsigned char)*a);
+		int cb = tolower((unsigned char)*b);
+
+		if (ca!=cb) {
+			// ensure "Game.ext" sorts before "Game 2.ext"
+			if (ca=='.' && cb==' ') return -1;
+			if (ca==' ' && cb=='.') return  1;
+			return ca - cb;
+		}
+
+		a++;
+		b++;
+	}
+
+	return tolower((unsigned char)*a) - tolower((unsigned char)*b);
 }
 
 // --------------------------------------------
@@ -1126,10 +1192,12 @@ Font* font36 = &(Font){
 		['V']['A'] = -6,
 		['A']['W'] = -3,
 		['W']['A'] = -3,
-		['A']['Y'] = -6,
-		['Y']['A'] = -6,
+		['A']['Y'] = -3,
+		['Y']['A'] = -3,
 		['T']['-'] = -6,
 		['-']['T'] = -6,
+		['L']['Y'] = -6,
+		['L']['T'] = -6,
 	},
 };
 
@@ -1160,8 +1228,12 @@ Font* font24 = &(Font){
 		['V']['A'] = -4,
 		['A']['W'] = -2,
 		['W']['A'] = -2,
+		['A']['Y'] = -2,
+		['Y']['A'] = -2,
 		['T']['-'] = -4,
 		['-']['T'] = -4,
+		['L']['Y'] = -4,
+		['L']['T'] = -4,
 	},
 };
 
@@ -1191,8 +1263,12 @@ Font* font18 = &(Font){
 		['V']['A'] = -3,
 		['A']['W'] = -1,
 		['W']['A'] = -1,
+		['A']['Y'] = -1,
+		['Y']['A'] = -1,
 		['T']['-'] = -3,
 		['-']['T'] = -3,
+		['L']['Y'] = -3,
+		['L']['T'] = -3,
 	},
 };
 
@@ -1222,8 +1298,12 @@ Font* font16 = &(Font){
 		['V']['A'] = -2,
 		['A']['W'] = -1,
 		['W']['A'] = -1,
+		['A']['Y'] = -1,
+		['Y']['A'] = -1,
 		['T']['-'] = -2,
 		['-']['T'] = -2,
+		['L']['Y'] = -2,
+		['L']['T'] = -2,
 	},
 };
 
@@ -2191,6 +2271,27 @@ static int App_wrap(Font* font, char* text, int max_lines, char** lines, int* sp
 	if (strlen(line)>0 && line_count<max_lines) {
 		lines[line_count++] = strdup(line);
 	}
+
+	// prevent single-word orphan
+	if (line_count>=2 && !splits[line_count-1]) {
+		char* last = lines[line_count-1];
+		
+		if (!strchr(last, ' ')) {
+			char* prev = lines[line_count-2];
+			char* space = strrchr(prev, ' ');
+			
+			if (space) {
+				char tmp[1024];
+				sprintf(tmp, "%s %s", space+1, last);
+				
+				*space = '\0';
+				
+				free(lines[line_count-1]);
+				lines[line_count-1] = strdup(tmp);
+			}
+		}
+	}
+
 	return line_count;
 }
 static void App_trunc(Font* font, const char* text, int max_width, char* out_text) {
@@ -2425,7 +2526,7 @@ static void App_top(int hud) {
 		SDL_Color color = WHITE_COLOR;
 		for (int i=0; i<line_count; i++) {
 			if (splits[i]) color = LIGHT_COLOR;
-			Font_shadowText(renderer, font36, lines[i], 20, 56+(i*36), color);
+			Font_shadowText(renderer, font36, lines[i], 20, 56+(i*39), color);
 			free(lines[i]);
 		}
 	}
