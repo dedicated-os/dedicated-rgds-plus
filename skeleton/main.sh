@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export SDCARD_PATH=/mnt/mmc
+export SDCARD_PATH=$(dirname $0)
 export PATH=$SDCARD_PATH/system/bin:$PATH
 export LD_LIBRARY_PATH=$SDCARD_PATH/system/lib:$LD_LIBRARY_PATH
 

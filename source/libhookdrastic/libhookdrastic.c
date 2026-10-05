@@ -51,13 +51,47 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define NUMBER_OF(items) (sizeof(items) / sizeof((items)[0]))
 #define LOG(...) printf(__VA_ARGS__); printf("\n"); fflush(stdout)
 
-#define SDCARD_PATH		"/mnt/mmc"
-#define GAMES_PATH 		SDCARD_PATH "/games"
-#define BIOS_PATH		SDCARD_PATH "/bios"
-#define ARCHIVE_PATH	GAMES_PATH "/archive"
-#define SYSTEM_PATH 	SDCARD_PATH "/system"
-#define ASSETS_PATH		SYSTEM_PATH "/assets"
-#define USERDATA_PATH	SDCARD_PATH "/userdata"
+#define MAX_LINE 1024
+#define MAX_PATH 512
+#define MAX_FILE 256
+
+static struct {
+	char root[MAX_PATH];
+	char games[MAX_PATH];
+	char bios[MAX_PATH];
+	char archive[MAX_PATH];
+	char system[MAX_PATH];
+	char assets[MAX_PATH];
+	char userdata[MAX_PATH];
+	char settings[MAX_PATH];
+} paths;
+
+#define Path_digit(n) ((n) ? "1" : "0")
+#define Path_concat(path, ...) Path_concat_implementation(path, __VA_ARGS__, NULL)
+static char *Path_concat_implementation(char *path, ...) {
+	va_list ap;
+	const char *s;
+
+	path[0] = '\0';
+
+	va_start(ap, path);
+	while ((s = va_arg(ap, const char *))) {
+		strcat(path, s);
+	}
+	va_end(ap);
+
+	return path;
+}
+static void Paths_init(void) {
+	Path_concat(paths.root, getenv("SDCARD_PATH"));
+	Path_concat(paths.games, paths.root, "/games");
+	Path_concat(paths.bios, paths.root, "/bios");
+	Path_concat(paths.archive, paths.games, "/archive");
+	Path_concat(paths.system, paths.root, "/system");
+	Path_concat(paths.assets, paths.system, "/assets");
+	Path_concat(paths.userdata, paths.root, "/userdata");
+	Path_concat(paths.settings, paths.userdata, "/settings.bin");
+}
 
 #define BAT_PATH 		"/sys/class/power_supply/cw2015-battery/"
 #define USB_PATH 		"/sys/class/power_supply/usb/"
@@ -68,10 +102,6 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 #define FREQ_GAME		"1800000"
 
 #define AUTO_SLOT 0
-
-#define MAX_LINE 1024
-#define MAX_PATH 512
-#define MAX_FILE 256
 
 // #define SCREEN_WIDTH  640
 // #define SCREEN_HEIGHT 480
@@ -525,19 +555,18 @@ static struct {
 	.grid = 1,
 };
 
-#define SETTINGS_PATH USERDATA_PATH "/settings.bin"
 static void Settings_load(void) {
 	raw_mute();
 	
-	if (access(SETTINGS_PATH, F_OK)!=0) return;
+	if (access(paths.settings, F_OK)!=0) return;
 	
-	FILE* file = fopen(SETTINGS_PATH, "rb");
+	FILE* file = fopen(paths.settings, "rb");
 	if (!file) return;
 	fread(&settings, sizeof(settings), 1, file);
 	fclose(file);
 }
 static void Settings_save(void) {
-	FILE* file = fopen(SETTINGS_PATH, "wb");
+	FILE* file = fopen(paths.settings, "wb");
 	if (!file) return;
 	fwrite(&settings, sizeof(settings), 1, file);
 	fclose(file);
@@ -1007,26 +1036,29 @@ static void drastic_load_nds_and_jump(const char* path) {
 	longjmp(*env, 1); // no return
 }
 static void drastic_load_state(int slot) {
+	assert(slot==0);
 	drastic_await_save();
 
 	void* sys = drastic_var_system();	
 	drastic_load_state_t d_load_state = GET_PFN(app.base + 0x000746f0); // nm ./drastic | grep load_state
 	
 	char path[MAX_PATH];
-	sprintf(path, USERDATA_PATH "/states/%s.st%i", app.game_name, slot);
-
+	Path_concat(path, paths.userdata, "/states/", app.game_name, ".st0");
 	d_load_state(sys, path, NULL,NULL,0);
 }
 static void drastic_save_state(int slot) {
+	assert(slot==0);
 	drastic_await_save();
 
 	void* sys = drastic_var_system();	
 	drastic_save_state_t d_save_state = GET_PFN(app.base + 0x00074da0); // nm ./drastic | grep save_state
 	
 	char name[MAX_FILE];
-	sprintf(name, "%s.st%i", app.game_name, slot);
+	Path_concat(name, app.game_name, ".st0");
 	
-	d_save_state(sys, USERDATA_PATH "/states/", name, NULL,NULL);
+	char path[MAX_PATH];
+	Path_concat(path, paths.userdata, "/states/");
+	d_save_state(sys, path, name, NULL,NULL);
 }
 static void drastic_quit(void) {
 	drastic_await_save();
@@ -1307,8 +1339,8 @@ Font* font16 = &(Font){
 };
 
 static void Font_init(Font* font) {
-	char path[MAX_FILE];
-	sprintf(path, "%s/%s", ASSETS_PATH, font->name);
+	char path[MAX_PATH];
+	Path_concat(path, paths.assets, "/", font->name);
 	font->bitmap = IMG_Load(path);
 	SDL_SetSurfaceBlendMode(font->bitmap, SDL_BLENDMODE_BLEND);
 	
@@ -2095,7 +2127,7 @@ static void App_screenshot(int game, int screen, int snap) {
 	if (dot && dot!=game_name) *dot = '\0';
 	
 	char path[MAX_PATH];
-	sprintf(path, USERDATA_PATH "/screenshots/%s-%i.bmp", game_name, screen);
+	Path_concat(path, paths.userdata, "/screenshots/", game_name, "-", Path_digit(screen), ".bmp");
 	// SDL_Log("screenshot: %s", path);
 	
 	void *pixels = NULL;
@@ -2126,9 +2158,9 @@ static void App_preview(int game, int screen, int snap) {
 	if (dot && dot!=game_name) *dot = '\0';
 	
 	char path[MAX_PATH];
-	sprintf(path, USERDATA_PATH "/screenshots/%s-%i.bmp", game_name, screen);
+	Path_concat(path, paths.userdata, "/screenshots/", game_name, "-", Path_digit(screen), ".bmp");
 	// SDL_Log("game_name: %s path: %s", game_name, path);
-	if (snap==SNAP_RESET || !exists(path)) sprintf(path, ASSETS_PATH "/screenshot-%i.png", screen);
+	if (snap==SNAP_RESET || !exists(path)) Path_concat(path, paths.assets, "/screenshot-", Path_digit(screen), ".png");
 
 	SDL_Log("preview: %s (snap: %i)", path, snap);
 	SDL_Surface* tmp = IMG_Load(path);
@@ -2613,7 +2645,7 @@ static void App_set(int i) {
 	strcpy(settings.game, item->name);
 	
 	static char game_path[MAX_PATH];
-	sprintf(game_path, "%s/%s", item->hidden ? ARCHIVE_PATH : GAMES_PATH, settings.game);
+	sprintf(game_path, "%s/%s", item->hidden ? paths.archive : paths.games, settings.game);
 	strcpy(app.game_path, game_path);
 	
 	strcpy(app.game_name, settings.game);
@@ -2641,6 +2673,7 @@ static void App_boot(void) {
 	
 	// before even drastic loads
 	// this is drastic setup logic
+	Paths_init();
 	raw_init();
 	
 	Settings_load();
@@ -2649,8 +2682,8 @@ static void App_boot(void) {
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	
 	char* dirs[] = {
-		GAMES_PATH,
-		ARCHIVE_PATH,
+		paths.games,
+		paths.archive,
 	};
 	
 	app.count = 0;
@@ -2734,8 +2767,9 @@ static void App_init(void) {
 	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
 	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
 	
-	app.xgl.meters = XGL_LoadTexture(renderer, ASSETS_PATH "/meters.png");
-	app.xgl.notches = XGL_LoadTexture(renderer, ASSETS_PATH "/notches.png");
+	char path[MAX_PATH];
+	app.xgl.meters = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/meters.png"));
+	app.xgl.notches = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/notches.png"));
 	
 	app.xgl.near = XGL_GetDefaultTextureShader(renderer);
 	app.xgl.grid = XGL_CreateGridShader(renderer);
@@ -3567,7 +3601,8 @@ static void App_extra(void) {
 	}
 	
 	if (!app.xgl.icons) {
-		app.xgl.icons = XGL_LoadTexture(app.xgl.renderers[0], ASSETS_PATH "/icons.png");
+		char path[MAX_PATH];
+		app.xgl.icons = XGL_LoadTexture(app.xgl.renderers[0], Path_concat(path, paths.assets, "/icons.png"));
 	}
 	
 }
@@ -3626,10 +3661,10 @@ static void App_archive(int current) {
 		if (Pad_justPressed(PAD_A)) {
 			Entry* item = &app.items[current];
 			
-			char shown[MAX_FILE];
-			sprintf(shown, "%s/%s", GAMES_PATH, item->name);
-			char hidden[MAX_FILE];
-			sprintf(hidden, "%s/%s", ARCHIVE_PATH, item->name);
+			char shown[MAX_PATH];
+			sprintf(shown, "%s/%s", paths.games, item->name);
+			char hidden[MAX_PATH];
+			sprintf(hidden, "%s/%s", paths.archive, item->name);
 			
 			char *dst,*src;
 			if (item->hidden) {
@@ -4064,7 +4099,10 @@ static void App_render(void) {
 			OSD_render(renderer);
 
 			if (drastic_fast_forward()) {
-				if (!app.xgl.icons) app.xgl.icons = XGL_LoadTexture(renderer, ASSETS_PATH "/icons.png");
+				if (!app.xgl.icons) {
+					char path[MAX_PATH];
+					app.xgl.icons = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/icons.png"));
+				}
 				XGL_RenderCopy(renderer, app.xgl.icons, &(SDL_Rect){48,0,24,24}, &(SDL_Rect){4,4,24,24});
 			}
 		}
@@ -4338,7 +4376,7 @@ int system(const char *command) {
 
 int __snprintf_chk(char *s, size_t maxlen, int flag, size_t slen, const char *fmt, ...) {
 	// hooked to repath save data
-	if (fmt && strcmp(fmt, "%s%cbackup%c%s.dsv")==0) return real__snprintf_chk(s, maxlen, flag, slen, USERDATA_PATH "/saves/%s.sram", app.game_name);
+	if (fmt && strcmp(fmt, "%s%cbackup%c%s.dsv")==0) return real__snprintf_chk(s, maxlen, flag, slen, "%s/%s/%s.sram", paths.userdata, "saves", app.game_name);
 
 	va_list ap;
 	va_start(ap, fmt);
@@ -4355,7 +4393,7 @@ int __sprintf_chk(char *s, int flag, size_t slen, const char *fmt, ...) {
 		const char* bios = va_arg(ap, const char*);	// %s
 		va_end(ap);
 		
-		if (bios && strncmp(bios, "nds_",4)==0) return real__sprintf_chk(s, flag, slen, BIOS_PATH "/%s", bios);
+		if (bios && strncmp(bios, "nds_",4)==0) return real__sprintf_chk(s, flag, slen, "%s/%s", paths.bios, bios);
 	}
 
 	va_list ap;

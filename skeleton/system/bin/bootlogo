@@ -1,6 +1,5 @@
 #!/bin/sh
 
-SDCARD_PATH=/mnt/mmc
 BOOT_LOGO_1=$SDCARD_PATH/bootlogo-top.bmp
 BOOT_LOGO_2=$SDCARD_PATH/bootlogo-bottom.bmp
 BOOT_LAST_1=$SDCARD_PATH/userdata/bootlogo-top.txt
