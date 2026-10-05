@@ -12,6 +12,7 @@ CHANGE LOG
 [x] fixed issue where volume never hit zero
 [x] stutter when leaving menu
 [x] properly sort roman numerals
+[x] poweroff screen doesn't have the grid
 [ ] stutter when leaving ff
 [ ] add color calibration shader?
 [ ] restore non-plus support?

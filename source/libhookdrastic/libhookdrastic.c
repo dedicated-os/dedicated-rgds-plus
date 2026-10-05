@@ -2554,7 +2554,9 @@ static void App_bye(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 
 		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
 		if (i==0) {
@@ -2578,7 +2580,9 @@ static void App_empty(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 
 		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
+		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
 		if (i==0) {
