@@ -537,6 +537,21 @@ static void raw_scr(int enable) {
 	}
 }
 
+static void raw_ip(char *out) {
+	out[0] = '\0';
+
+	unsetenv("LD_PRELOAD");
+	FILE *fp = popen("ip -4 route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i==\"src\") print $(i+1)}'", "r");
+	if (!fp) return;
+	if (!fgets(out, 64, fp)) out[0] = '\0';
+	
+	pclose(fp);
+	if (!out[0]) return;
+	
+	char *nl = strchr(out, '\n');
+	if (nl) *nl = '\0';
+}
+
 // --------------------------------------------
 // settings
 // --------------------------------------------
@@ -3766,6 +3781,9 @@ static void App_system(void) {
 	Pad_reset();
 	Device_poke();
 	
+	char ip[64];
+	raw_ip(ip);
+	
 	while (system) {
 		while (system && Pad_pollEvent(&event)) {
 			if (Device_handleEvent(&event)) {
@@ -3850,6 +3868,15 @@ static void App_system(void) {
 				}
 				
 				font_renderer(renderer, font24, items[i], x+8, y+8+(i*oh), color);
+			}
+			
+			if (ip[0]) {
+				Font_getTextSize(font18, ip, &w, NULL);
+				h = 15;
+				x = (SCREEN_WIDTH - w) / 2;
+				y = SCREEN_HEIGHT - (8+h+8) - 20;
+				AA_rect(renderer, x-8,y-8,8+w+8,8+h+8, 0, TRIAD_ALPHA(BLACK_TRIAD,0x40));
+				Font_shadowText(renderer, font18, ip, x,y, WHITE_COLOR);
 			}
 			
 			if (app.capture) App_capture("menu");
