@@ -103,11 +103,30 @@ static const char *XGL_default_fragment_shader =
 		"gl_FragColor = texture2D(u_texture, v_texcoord) * u_color;"
 	"}";
 
+// biased vertically like my personal DS Lite
+// 8522
+// 6400
+// 6400
+// 6400
+static const char *XGL_grid_fragment_shader_vert =
+    "precision mediump float;"
+    "varying vec2 v_texcoord;"
+    "uniform sampler2D u_texture;"
+    "uniform vec4 u_color;"
+    "void main() {"
+        "vec4 color = texture2D(u_texture, v_texcoord) * u_color;"
+        "vec2 g = mod(gl_FragCoord.xy, 4.0);"
+        "float shade = 1.0;"
+        "if (g.y < 1.0) {"
+            "shade = g.x < 1.0 ? 0.2 : (g.x < 2.0 ? 0.5 : 0.8);"
+        "} else {"
+            "shade = g.x < 1.0 ? 0.4 : (g.x < 2.0 ? 0.6 : 1.0);"
+        "}"
+        "color.rgb *= shade;"
+        "gl_FragColor = color;"
+    "}";
+
 // still biased vertically but more dot-like
-// X313
-// 8101
-// 5000
-// 8101
 static const char *XGL_grid_fragment_shader =
 	"precision mediump float;"
 	"varying vec2 v_texcoord;"
@@ -117,14 +136,10 @@ static const char *XGL_grid_fragment_shader =
 		"vec4 color = texture2D(u_texture, v_texcoord) * u_color;"
 		"vec2 g = mod(gl_FragCoord.xy, 4.0);"
 		"float shade = 1.0;"
-		"if (g.y >= 3.0) {"
-			"shade = g.x < 1.0 ? 0.0 : (g.x < 2.0 ? 0.7 : (g.x < 3.0 ? 0.9 : 0.7));"
-		"} else if (g.y >= 2.0) {"
-			"shade = g.x < 1.0 ? 0.2 : (g.x < 2.0 ? 0.9 : (g.x < 3.0 ? 1.0 : 0.9));"
-		"} else if (g.y >= 1.0) {"
-			"shade = g.x < 1.0 ? 0.5 : 1.0;"
+		"if (g.y < 1.0 || g.y >= 3.0) {"
+			"shade = g.x < 1.0 ? 0.15 : (g.x < 2.0 ? 0.75 : (g.x < 3.0 ? 0.95 : 0.45));"
 		"} else {"
-			"shade = g.x < 1.0 ? 0.2 : (g.x < 2.0 ? 0.9 : (g.x < 3.0 ? 1.0 : 0.9));"
+			"shade = g.x < 1.0 ? 0.45 : (g.x < 3.0 ? 1.0 : 0.95);"
 		"}"
 		"color.rgb *= shade;"
 		"gl_FragColor = color;"
