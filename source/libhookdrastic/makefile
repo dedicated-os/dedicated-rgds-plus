@@ -4,9 +4,9 @@ endif
 
 TARGET=libhookdrastic
 
-REMOTE_ADDR=192.168.7.27
-REMOTE_PATH=/mnt/mmc/system/lib
-# REMOTE_PATH=/mnt/sdcard/system/lib
+REMOTE_ADDR=192.168.7.105
+# REMOTE_PATH=/mnt/mmc/system/lib
+REMOTE_PATH=/mnt/sdcard/system/lib
 REMOTE_DISK=root@$(REMOTE_ADDR)
 
 SSH := sshpass -p root ssh $(REMOTE_DISK)

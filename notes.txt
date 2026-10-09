@@ -22,6 +22,21 @@ CHANGE LOG
 [/] increase type/icon size 1.5x
 [ ] update instructions below for Plus
 [ ] delete non-plus releases?
+[ ] create separate union-rgds-toolchain
+	mix of zero40-toolchain and generic-handheld-docker
+[ ] move to separate dedicated-rgds-plus repo (to pair with main-rgds-plus)
+[ ] separate manual and auto states?
+	save and load always affect manual slot (user)
+	autosave and autoresume always affect auto slot (system)
+	except autoresume always replaces manual state with auto
+		eg. power on, switching from another game
+[ ] does the lid halt render? it probably should
+[ ] in-game shoulder button presses need to poke the wake timer
+	re: Duck Amuck
+[ ] improve onboarding
+	add expanding bootlogo
+	move bootlogo tools to image
+	move bootlogo checksums to image
 
 -----------------------------------------------
 
