@@ -4,7 +4,7 @@
 led off
 
 # update bootlogo if changed
-bootlogo
+bootlogo $SDCARD_PATH && reboot
 
 # drastic
 EXEC_LOOP=/tmp/exec_loop

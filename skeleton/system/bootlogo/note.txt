@@ -1,3 +1,0 @@
-binaries and libraries sourced from
-
-	https://github.com/shauninman/generic-handheld-docker
