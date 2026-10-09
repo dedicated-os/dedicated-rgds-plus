@@ -101,7 +101,10 @@ static void Paths_init(void) {
 #define FREQ_MENU		"408000"
 #define FREQ_GAME		"1800000"
 
-#define AUTO_SLOT 0
+enum {
+	AUTO_STATE = 0,
+	USER_STATE,
+};
 
 // #define SCREEN_WIDTH  640
 // #define SCREEN_HEIGHT 480
@@ -1050,30 +1053,25 @@ static void drastic_load_nds_and_jump(const char* path) {
 	jmp_buf *env = (jmp_buf *)((uint8_t *)sys + 0x3b2a840); // from main in Cutter
 	longjmp(*env, 1); // no return
 }
-static void drastic_load_state(int slot) {
-	assert(slot==0);
+static void drastic_load_state(const char *name) {
 	drastic_await_save();
 
 	void* sys = drastic_var_system();	
 	drastic_load_state_t d_load_state = GET_PFN(app.base + 0x000746f0); // nm ./drastic | grep load_state
 	
 	char path[MAX_PATH];
-	Path_concat(path, paths.userdata, "/states/", app.game_name, ".st0");
+	Path_concat(path, paths.userdata, "/states/", name);
 	d_load_state(sys, path, NULL,NULL,0);
 }
-static void drastic_save_state(int slot) {
-	assert(slot==0);
+static void drastic_save_state(const char *name) {
 	drastic_await_save();
 
 	void* sys = drastic_var_system();	
 	drastic_save_state_t d_save_state = GET_PFN(app.base + 0x00074da0); // nm ./drastic | grep save_state
-	
-	char name[MAX_FILE];
-	Path_concat(name, app.game_name, ".st0");
-	
+		
 	char path[MAX_PATH];
 	Path_concat(path, paths.userdata, "/states/");
-	d_save_state(sys, path, name, NULL,NULL);
+	d_save_state(sys, path, (char *)name, NULL,NULL);
 }
 static void drastic_quit(void) {
 	drastic_await_save();
@@ -1754,8 +1752,8 @@ static int Pad_pollEvent(SDL_Event* event) {
 // --------------------------------------------
 static void App_init(void);
 static void App_quit(void);
-static void App_load(void);
-static void App_save(void);
+static void App_load(int state);
+static void App_save(int state);
 static void App_reset(void);
 static void App_extra(void);
 static void App_bye(void);
@@ -1807,8 +1805,6 @@ static void OSD_render(XGL_Renderer *renderer) {
 // device features
 // --------------------------------------------
 #define AWAKE_TIMEOUT (30 * 1000) // thirty seconds
-#define SLEEP_TIMEOUT (2 * 60 * 1000) // two minutes
-#define WAKE_DEFER 250 // quarter of a second
 #define POWEROFF_TIMEOUT 2 * 60 * 1000 // two minutes
 #define POWER_TIMEOUT 1000 // one second
 static int awake_at = 0;
@@ -1857,7 +1853,7 @@ static void Device_idle(void) {
 	// raw_scr(0); // causes audio lag
 
 	Settings_save();
-	App_save();
+	App_save(AUTO_STATE);
 
 	idle_at = SDL_GetTicks();
 	idling = 1;
@@ -1905,7 +1901,7 @@ static void Device_sleep(void) {
 	Settings_save();
 	drastic_audio_pause(1);
 	
-	App_save();
+	App_save(AUTO_STATE);
 	// drastic_await_save(); // not necessary, drastic_quit already calls this
 	
 	int was_closed = getInt(app.lid)==2;
@@ -1961,6 +1957,7 @@ static void Device_poke(void) {
 }
 static int Device_autosleep(void) {
 	int dirty = 0;
+	return 0; // disabled
 	
 	if (Pad_anyPressed() || Pad_anyJustPressed() || Pad_anyJustReleased()) {
 		Device_poke();
@@ -1983,7 +1980,7 @@ static void Device_poweroff(void) {
 	sleep(2);
 	
 	raw_mute();
-	App_save();
+	App_save(AUTO_STATE);
 	unlink("/tmp/exec_loop");
 	raw_bri(0);
 	raw_led(1);
@@ -2126,23 +2123,58 @@ static int Device_handleEvent(SDL_Event* event) {
 // --------------------------------------------
 
 enum {
-	SNAP_SAVE = 0,
+	SNAP_USER = 0,
 	SNAP_CURRENT,
 	SNAP_RESET,
+	SNAP_AUTO,
 };
 
+static void App_snapName(int game, int snap, char *game_name) {
+	if (snap==SNAP_CURRENT) strcpy(game_name, "current");
+	else if (snap==SNAP_USER) strcpy(game_name, "session");
+	else strcpy(game_name, app.items[game].name);
+	
+	char *dot = strrchr(game_name, '.');
+	if (dot && dot!=game_name) *dot = '\0';
+}
+static void App_snapPath(char *path, const char *game_name, int screen, int snap) {
+	Path_concat(path, paths.userdata, "/screenshots/", game_name, "-", Path_digit(screen), ".bmp");
+}
+static void App_stateName(char *name, int state) {
+	if (state==USER_STATE) strcpy(name, "session.st0");
+	else Path_concat(name, app.game_name, ".st0");
+}
+static void App_statePath(char *path, const char *name) {
+	Path_concat(path, paths.userdata, "/states/", name);
+}
+static void App_copy(const char *src, const char *dst) {
+	FILE *in = fopen(src, "rb");
+	if (!in) return;
+	
+	FILE *out = fopen(dst, "wb");
+	if (!out) {
+		fclose(in);
+		return;
+	}
+	
+	char buf[4096];
+	size_t n;
+	while ((n=fread(buf, 1, sizeof(buf), in))>0) {
+		fwrite(buf, 1, n, out);
+	}
+	
+	fclose(out);
+	fclose(in);
+}
 static void App_screenshot(int game, int screen, int snap) {
 	if (!app.xgl.screens[screen]) return;
 	XGL_Texture* texture = app.xgl.screens[screen];
 	
 	char game_name[MAX_FILE];
-	if (snap==SNAP_CURRENT) strcpy(game_name, "current");
-	else strcpy(game_name, app.items[game].name);
-	char *dot = strrchr(game_name, '.');
-	if (dot && dot!=game_name) *dot = '\0';
+	App_snapName(game, snap, game_name);
 	
 	char path[MAX_PATH];
-	Path_concat(path, paths.userdata, "/screenshots/", game_name, "-", Path_digit(screen), ".bmp");
+	App_snapPath(path, game_name, screen, snap);
 	// SDL_Log("screenshot: %s", path);
 	
 	void *pixels = NULL;
@@ -2167,13 +2199,10 @@ static void App_preview(int game, int screen, int snap) {
 	XGL_Texture* texture = app.xgl.previews[screen];
 	
 	char game_name[MAX_FILE];
-	if (snap==SNAP_CURRENT) strcpy(game_name, "current");
-	else strcpy(game_name, app.items[game].name);
-	char *dot = strrchr(game_name, '.');
-	if (dot && dot!=game_name) *dot = '\0';
+	App_snapName(game, snap, game_name);
 	
 	char path[MAX_PATH];
-	Path_concat(path, paths.userdata, "/screenshots/", game_name, "-", Path_digit(screen), ".bmp");
+	App_snapPath(path, game_name, screen, snap);
 	// SDL_Log("game_name: %s path: %s", game_name, path);
 	if (snap==SNAP_RESET || !exists(path)) Path_concat(path, paths.assets, "/screenshot-", Path_digit(screen), ".png");
 
@@ -2207,13 +2236,61 @@ static void App_capture(const char *name) {
 	SDL_FreeSurface(tmp);
 	app.capture = 0;
 }
-static void App_load(void) {
-	drastic_load_state(AUTO_SLOT);
+static void App_load(int state) {
+	char name[MAX_FILE];
+	char path[MAX_PATH];
+
+	App_stateName(name, state);
+	App_statePath(path, name);
+	
+	if (state==AUTO_STATE) {
+		char src[MAX_PATH];
+		char dst[MAX_PATH];
+		
+		// delete stale session state
+		App_stateName(name, USER_STATE);
+		App_statePath(dst, name);
+		unlink(dst);
+		
+		char user_name[MAX_FILE];
+		App_snapName(app.current, SNAP_USER, user_name);
+		for (int screen=0; screen<SCREEN_COUNT; screen++) {
+			App_snapPath(dst, user_name, screen, SNAP_USER);
+			unlink(dst);
+		}
+		
+		App_stateName(name, AUTO_STATE);
+		App_statePath(path, name);
+		if (!exists(path)) return;
+		
+		// load persistent state into session
+		App_statePath(src, name);
+		App_stateName(name, USER_STATE);
+		App_statePath(dst, name);
+		App_copy(src, dst);
+		
+		char auto_name[MAX_FILE];
+		App_snapName(app.current, SNAP_AUTO, auto_name);
+		for (int screen=0; screen<SCREEN_COUNT; screen++) {
+			App_snapPath(src, auto_name, screen, SNAP_AUTO);
+			App_snapPath(dst, user_name, screen, SNAP_USER);
+			App_copy(src, dst);
+		}
+
+		App_stateName(name, USER_STATE);
+		App_statePath(path, name);
+	}
+	
+	if (!exists(path)) return;
+	drastic_load_state(name);
 }
-static void App_save(void) {
-	App_screenshot(app.current, 0, SNAP_SAVE);
-	App_screenshot(app.current, 1, SNAP_SAVE);
-	drastic_save_state(AUTO_SLOT);
+static void App_save(int state) {
+	int snap = state==AUTO_STATE ? SNAP_AUTO : SNAP_USER;
+	char name[MAX_FILE];
+	App_stateName(name, state);
+	App_screenshot(app.current, 0, snap);
+	App_screenshot(app.current, 1, snap);
+	drastic_save_state(name);
 }
 static void App_reset(void) {
 	drastic_audio_pause(0);
@@ -2590,11 +2667,11 @@ static void App_bye(void) {
 	
 	int battery = getInt(app.bat);
 	int is_charging = getInt(app.usb);
-	const char* lines[] = {
-		"Saving &",
-		"shutting",
-		"down...",
-	};
+	// const char* lines[] = {
+	// 	"Saving &",
+	// 	"shutting",
+	// 	"down...",
+	// };
 	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
@@ -2608,9 +2685,11 @@ static void App_bye(void) {
 		if (i==0) {
 			App_battery(renderer, battery,is_charging,1);	
 			Font_shadowText(renderer, font24, "Dedicated OS", 20,20, LIGHT_COLOR);
-			for (int j=0; j<3; j++) {
-				Font_shadowText(renderer, font36, lines[j], 20, 56+(j*36), WHITE_COLOR);
-			}
+			Font_shadowText(renderer, font36, "Saving & shutting down...", 20, 20+36, WHITE_COLOR);
+			
+			// for (int j=0; j<3; j++) {
+			// 	Font_shadowText(renderer, font36, lines[j], 20, 56+(j*36), WHITE_COLOR);
+			// }
 		}
 
 		XGL_RenderPresent(renderer);
@@ -3703,7 +3782,7 @@ static void App_archive(int current) {
 		if (dirty) {
 			dirty = 0;
 			
-			int snap = current==app.current ? SNAP_CURRENT : SNAP_SAVE;
+			int snap = current==app.current ? SNAP_CURRENT : SNAP_AUTO;
 			App_focus(current, snap);
 			App_top(1);
 			
@@ -3978,13 +4057,13 @@ static void App_menu(void) {
 			}
 		}
 		if (Pad_justPressed(PAD_A)) {
-			if (current==app.current) {
-				if (selected==0) { // SAVE
-					App_save();
-				}
-				else if (selected==1) { // LOAD
-					App_load();
-				}
+				if (current==app.current) {
+					if (selected==0) { // SAVE
+						App_save(USER_STATE);
+					}
+					else if (selected==1) { // LOAD
+						App_load(USER_STATE);
+					}
 				else if (selected==2) { // RESET
 					App_reset();
 				}
@@ -3992,7 +4071,7 @@ static void App_menu(void) {
 			}
 			else {
 				if (selected==0) { // LOAD
-					App_save();
+					App_save(AUTO_STATE);
 					App_set(current);
 					Settings_save();
 				
@@ -4004,7 +4083,7 @@ static void App_menu(void) {
 					in_menu = 0;
 				}
 				else if (selected==1) { // RESET
-					App_save();
+					App_save(AUTO_STATE);
 					App_set(current);
 					Settings_save();
 				
@@ -4041,7 +4120,7 @@ static void App_menu(void) {
 			selected %= count;
 			
 			int reset_selected = current==app.current ? selected==2 : selected==1;
-			int snap = reset_selected ? SNAP_RESET : (current==app.current && selected==0 ? SNAP_CURRENT : SNAP_SAVE);
+			int snap = reset_selected ? SNAP_RESET : (current==app.current ? (selected==0 ? SNAP_CURRENT : SNAP_USER) : SNAP_AUTO);
 			App_focus(current, snap);
 			App_top(1);
 			
@@ -4186,7 +4265,7 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 			if (loader.after==LOADER_RESUME) {
 				puts("[LOAD] perform resume");
 				loader.after = LOADER_RESET;
-				drastic_load_state(AUTO_SLOT);
+				App_load(AUTO_STATE);
 			}
 			else puts("[LOAD] perform reset");
 			Device_mute(0);
