@@ -1863,7 +1863,7 @@ static void Device_idling(void) {
 	// exit
 	if (Pad_justPressed(PAD_OPEN)) {
 		emitKeyEvent(KEY_LID, 0);
-		deidle = 3;
+		deidle = 4;
 	}
 	
 	// a few frames after exit (basically till drastic/game draws again)
@@ -4187,6 +4187,11 @@ static void App_menu(void) {
 
 static int render_drastic_menu = 0;
 static void App_render(void) {
+	if (idling) {
+		real_SDL_Delay(1); // drastic paces itself
+		return;
+	}
+	
 	if (render_drastic_menu) {
 		render_drastic_menu = 0;
 		XGL_Renderer *renderer = app.xgl.renderers[0];

@@ -2,53 +2,29 @@ CHANGE LOG
 
 - initial release
 
------------------------------------------------
+----------------------------------------
 
-[x] clean up mic implementation
-[x] look into lag that is fixed by fast forwarding
-[x] add grid shader
 [x] add settings.grid toggle (MENU+L2)
 	add to hints?
-[x] fixed issue where volume never hit zero
-[x] stutter when leaving menu
-[x] properly sort roman numerals
-[x] poweroff screen doesn't have the grid
+[ ] stutter when leaving menu is back?
 [ ] stutter when leaving ff
-[ ] add color calibration shader?
-[ ] restore non-plus support?
-	for Sydney
-	she didn't immediately latch onto Nintendogs like I thought she would
-	so maybe not
 [/] increase type/icon size 1.5x
-[ ] update instructions below for Plus
 [ ] delete non-plus releases?
-[ ] separate manual and auto states?
-	save and load always affect manual slot (user)
-	autosave and autoresume always affect auto slot (system)
-	except autoresume always replaces manual state with auto
-		eg. power on, switching from another game
 [ ] does the lid halt render? it probably should
 [ ] in-game shoulder button presses need to poke the wake timer
 	re: Duck Amuck
-[x] create separate union-rgds-toolchain (upgraded to trixie)
-[x] move to separate dedicated-rgds-plus repo (to pair with main-rgds-plus)
-[x] improve onboarding
 
------------------------------------------------
+----------------------------------------
 
 I should move drastic.cfg into a blob 
 	to prevent tampering (which can break things)
 
------------------------------------------------
-
-NOTE: build with the zero40-toolchain (!?)
-
------------------------------------------------
+----------------------------------------
 
 drastic (17550db727f3b59d36b57746ad1944be) from: 
 	https://github.com/ROCKNIX/packages/blob/main/drastic.tar.gz
 
------------------------------------------------
+----------------------------------------
 
 Look up program function (eg. Drastic's quit)
 
@@ -60,25 +36,21 @@ Look up program function (eg. Drastic's quit)
 
 then in Cutter find sym.quit, show Xrefs, and trace its args up through the call sites 
 
------------------------------------------------
+----------------------------------------
+
+NOTE: Using two separate cards, one for the system and another for games/userdata, is the preferred setup. Using a single card is possible but not recommended.
 
 # Updating
-
-1. Download the `dedicated-rgds` zip file below.
-2. Unzip the downloaded zip file and copy just system.zip to the root of your SD card.
+1. Download the `dedicated-rgds-plus` zip below.
+2. Unzip and copy `system.zip` to the root of your TF2/EXT SD card.
+3. Eject and insert the card back into the TF2/EXT slot.
 
 # Installing
+1. Download the latest [main-rgds-plus][main] image.
+2. Flash the image to a small SD card. Insert into the TF1/INT slot.
+3. Download the `dedicated-rgds-plus` zip below.
+4. Format a larger SD card as FAT32 (MBR not GPT).
+5. Unzip the downloaded zip file and copy its contents to the root of the freshly formatted SD card.
+6. Add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now). Insert into the TF2/EXT slot.
 
-**WARNING:** Installation erases the SD card so backup any existing data first.
-
-1. Download and install the latest [stock Linux firmware][stock] from Anbernic (do not add your games yet).
-2. (Optional) Setup wifi if you plan to tinker over ssh/sftp.
-3. Download and unzip the latest [main-rgds][main] zip file.
-4. Copy its contents to `/Roms/APPS` on the SD card.
-5. Run Hijack from Applications > Apps on the device. It will shutdown when complete.
-6. Download and unzip the `dedicated-rgds` zip file below.
-7. Copy its contents to the root of your freshly hijacked SD card.
-8. Now add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now).
-
-[stock]: https://win.anbernic.com/download/640.html
-[main]: https://github.com/dedicated-os/main-rgds/releases/latest
+[main]:https://github.com/dedicated-os/main-rgds-plus/releases/lates
