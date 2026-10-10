@@ -1866,7 +1866,7 @@ static void Device_idling(void) {
 		deidle = 4;
 	}
 	
-	if (Pad_justPressed(L1) || Pad_justPressed(R1)) {
+	if (Pad_justPressed(PAD_L1) || Pad_justPressed(PAD_R1)) {
 		idle_at = SDL_GetTicks();
 	}
 	
