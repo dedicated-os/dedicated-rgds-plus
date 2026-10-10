@@ -1,12 +1,12 @@
 # DEDICATED OS
 
-DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS Plus. It is also available on the [MagicX Zero40](https://github.com/dedicated-os/dedicated-zero40).
+DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS Plus.
 
 This is what it looks like:
 
 <img width=256 src="github/dedicated-menu.png" title=Menu /> <img width=256 src="github/dedicated-archive.png" title=Archive /> 
 
-That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-rgds/releases).
+That's it. You can [grab the latest version here](https://github.com/dedicated-os/dedicated-rgds-plus/releases).
 
 ## Features
 
@@ -35,7 +35,7 @@ Lid events are automatically sent directly to the running game. Games that requi
 
 ## Known Issues
 
-Some DS games are known to hang in drastic when the lid is closed (eg. Monster Tale, Radiant Historia, Ni no Kuni). These games are blocked from lid support. They will instead enter or exit faux sleep instead of receiving lid events. If you encounter another game that freezes when the lid is closed, let me know so I can add them to the blocklist.
+Some DS games hang in drastic when the lid is closed (eg. Monster Tale, Radiant Historia, Ni no Kuni). These games are blocked from lid support. They will instead enter or exit faux sleep instead of receiving lid events. If you encounter another game that freezes when the lid is closed, let me know so I can add them to the blocklist.
 
 ## Original RG DS Support
 
