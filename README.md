@@ -29,9 +29,9 @@ Press the Anbernic/MENU button to open the in-game menu where you can save, load
 
 Press MENU again to open the system menu where you can manage your archive and set the date, time, and timezone.
 
-Lid events are automatically sent directly to the running game. Games that require the microphone automatically use the microphone.
-
 <img width=256 src="github/dedicated-datetime.png" title=Datetime /> <img width=256 src="github/dedicated-timezone.png" title=Timezone /> 
+
+Lid events are automatically sent directly to the running game. Games that require the microphone automatically use the microphone.
 
 ## Known Issues
 

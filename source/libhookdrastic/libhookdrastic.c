@@ -1866,6 +1866,10 @@ static void Device_idling(void) {
 		deidle = 4;
 	}
 	
+	if (Pad_justPressed(L1) || Pad_justPressed(R1)) {
+		idle_at = SDL_GetTicks();
+	}
+	
 	// a few frames after exit (basically till drastic/game draws again)
 	if (deidle>0) {
 		deidle -= 1;

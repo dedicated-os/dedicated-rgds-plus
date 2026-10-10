@@ -9,10 +9,6 @@ CHANGE LOG
 [ ] stutter when leaving menu is back?
 [ ] stutter when leaving ff
 [/] increase type/icon size 1.5x
-[ ] delete non-plus releases?
-[ ] does the lid halt render? it probably should
-[ ] in-game shoulder button presses need to poke the wake timer
-	re: Duck Amuck
 
 ----------------------------------------
 
@@ -38,7 +34,7 @@ then in Cutter find sym.quit, show Xrefs, and trace its args up through the call
 
 ----------------------------------------
 
-NOTE: Using two separate cards, one for the system and another for games/userdata, is the preferred setup. Using a single card is possible but not recommended.
+NOTE: Using two separate cards, one for the system and another for games and userdata, is the preferred setup. Using a single card is possible but not recommended.
 
 # Updating
 1. Download the `dedicated-rgds-plus` zip below.
@@ -53,4 +49,4 @@ NOTE: Using two separate cards, one for the system and another for games/userdat
 5. Unzip the downloaded zip file and copy its contents to the root of the freshly formatted SD card.
 6. Add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now). Insert into the TF2/EXT slot.
 
-[main]:https://github.com/dedicated-os/main-rgds-plus/releases/lates
+[main]:https://github.com/dedicated-os/main-rgds-plus/releases/latest
