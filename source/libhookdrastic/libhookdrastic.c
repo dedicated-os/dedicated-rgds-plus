@@ -2240,48 +2240,58 @@ static void App_capture(const char *name) {
 	SDL_FreeSurface(tmp);
 	app.capture = 0;
 }
+static int App_session(void) {
+	char name[MAX_FILE];
+	char path[MAX_PATH];
+	
+	char src[MAX_PATH];
+	char dst[MAX_PATH];
+	
+	// delete stale session state
+	App_stateName(name, USER_STATE);
+	App_statePath(dst, name);
+	unlink(dst);
+	
+	char user_name[MAX_FILE];
+	char auto_name[MAX_FILE];
+	App_snapName(app.current, SNAP_USER, user_name);
+	App_snapName(app.current, SNAP_AUTO, auto_name);
+
+	for (int screen=0; screen<SCREEN_COUNT; screen++) {
+		App_snapPath(dst, user_name, screen, SNAP_USER);
+		unlink(dst);
+	}
+	
+	App_stateName(name, AUTO_STATE);
+	App_statePath(path, name);
+	if (!exists(path)) return 0;
+	
+	// load persistent state into session
+	App_statePath(src, name);
+	App_stateName(name, USER_STATE);
+	App_statePath(dst, name);
+	App_copy(src, dst);
+	
+	for (int screen=0; screen<SCREEN_COUNT; screen++) {
+		App_snapPath(src, auto_name, screen, SNAP_AUTO);
+		App_snapPath(dst, user_name, screen, SNAP_USER);
+		App_copy(src, dst);
+	}
+
+	return 1;
+}
 static void App_load(int state) {
 	char name[MAX_FILE];
 	char path[MAX_PATH];
 
-	App_stateName(name, state);
-	App_statePath(path, name);
-	
 	if (state==AUTO_STATE) {
-		char src[MAX_PATH];
-		char dst[MAX_PATH];
-		
-		// delete stale session state
-		App_stateName(name, USER_STATE);
-		App_statePath(dst, name);
-		unlink(dst);
-		
-		char user_name[MAX_FILE];
-		App_snapName(app.current, SNAP_USER, user_name);
-		for (int screen=0; screen<SCREEN_COUNT; screen++) {
-			App_snapPath(dst, user_name, screen, SNAP_USER);
-			unlink(dst);
-		}
-		
-		App_stateName(name, AUTO_STATE);
-		App_statePath(path, name);
-		if (!exists(path)) return;
-		
-		// load persistent state into session
-		App_statePath(src, name);
-		App_stateName(name, USER_STATE);
-		App_statePath(dst, name);
-		App_copy(src, dst);
-		
-		char auto_name[MAX_FILE];
-		App_snapName(app.current, SNAP_AUTO, auto_name);
-		for (int screen=0; screen<SCREEN_COUNT; screen++) {
-			App_snapPath(src, auto_name, screen, SNAP_AUTO);
-			App_snapPath(dst, user_name, screen, SNAP_USER);
-			App_copy(src, dst);
-		}
+		if (!App_session()) return;
 
 		App_stateName(name, USER_STATE);
+		App_statePath(path, name);
+	}
+	else {
+		App_stateName(name, state);
 		App_statePath(path, name);
 	}
 	
@@ -4061,13 +4071,13 @@ static void App_menu(void) {
 			}
 		}
 		if (Pad_justPressed(PAD_A)) {
-				if (current==app.current) {
-					if (selected==0) { // SAVE
-						App_save(USER_STATE);
-					}
-					else if (selected==1) { // LOAD
-						App_load(USER_STATE);
-					}
+			if (current==app.current) {
+				if (selected==0) { // SAVE
+					App_save(USER_STATE);
+				}
+				else if (selected==1) { // LOAD
+					App_load(USER_STATE);
+				}
 				else if (selected==2) { // RESET
 					App_reset();
 				}
@@ -4090,11 +4100,9 @@ static void App_menu(void) {
 					App_save(AUTO_STATE);
 					App_set(current);
 					Settings_save();
-				
-					drastic_audio_pause(0);
-					puts("[LOAD] reset requested");
-					loader.state = LOADER_REQUESTED;
-					loader.after = LOADER_RESET;
+
+					App_session(); // switch session to incoming game
+					App_reset();
 				
 					in_menu = 0;
 				}

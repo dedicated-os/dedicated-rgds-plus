@@ -1,6 +1,6 @@
 # DEDICATED OS
 
-DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the RG DS Plus.
+DEDICATED OS is a cluster of hyper-focused, single-system launchers for specific devices. This version is for playing Nintendo DS on the Anbernic RG DS Plus.
 
 This is what it looks like:
 
