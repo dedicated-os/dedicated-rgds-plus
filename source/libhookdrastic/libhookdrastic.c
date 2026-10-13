@@ -240,6 +240,8 @@ static struct {
 	int menu;
 	int osd;
 	int capture;
+	
+	uint64_t menu_us; // elapsed time in menu
 } app;
 
 static struct {
@@ -643,6 +645,7 @@ static int (*real_puts)(const char *__s) = NULL;
 static int (*real__printf_chk)(int flag, const char *fmt, ...) = NULL;
 static int (*real_open64)(const char *pathname, int flags, ...) = NULL;
 static ssize_t (*real_read)(int fd, void *buf, size_t count) = NULL;
+static int (*real_gettimeofday)(struct timeval *tv, void *tz) = NULL;
 
 // --------------------------------------------
 // logging
@@ -1020,8 +1023,8 @@ static void drastic_audio_pause(int flag) {
 static void drastic_audio_reset_buffer(void) {
 	void* sys = drastic_var_system();
 	void* audio = (uint8_t *)sys + 0x1587000;
-	drastic_audio_reset_buffer_t drastic_audio_reset_buffer = GET_PFN(app.base + 0x00088620);
-	drastic_audio_reset_buffer(audio);
+	drastic_audio_reset_buffer_t reset_buffer = GET_PFN(app.base + 0x00088620);
+	reset_buffer(audio);
 }
 
 static int drastic_fast_forward(void) {
@@ -2210,7 +2213,7 @@ static void App_preview(int game, int screen, int snap) {
 	// SDL_Log("game_name: %s path: %s", game_name, path);
 	if (snap==SNAP_RESET || !exists(path)) Path_concat(path, paths.assets, "/screenshot-", Path_digit(screen), ".png");
 
-	SDL_Log("preview: %s (snap: %i)", path, snap);
+	// SDL_Log("preview: %s (snap: %i)", path, snap);
 	SDL_Surface* tmp = IMG_Load(path);
 
 	int w, h;
@@ -3984,7 +3987,15 @@ static void App_system(void) {
 	Pad_reset();
 }
 
+static uint64_t time_us(void) {
+	struct timeval tv;
+	real_gettimeofday(&tv, NULL);
+	return ((uint64_t)tv.tv_sec * 1000000ULL) + (uint64_t)tv.tv_usec;
+}
+
 static void App_menu(void) {
+	uint64_t open_us = time_us();
+	
 	SDL_Log("enter menu");
 	app.menu = 1;
 	Mic_pause(1);
@@ -4189,12 +4200,15 @@ static void App_menu(void) {
 	
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
-		drastic_resync();
 		if (!drastic_fast_forward()) Device_mute(0);
 		Mic_pause(0);
+
+		drastic_resync();
 	}
-	app.menu = 0;
 	SDL_Log("exit menu");
+
+	app.menu_us += time_us() - open_us;
+	app.menu = 0;
 }
 
 static int render_drastic_menu = 0;
@@ -4394,32 +4408,9 @@ int SDL_PollEvent(SDL_Event* event) {
 	}
 }
 
-static struct {
-	void (*callback)(void *, Uint8 *, int);
-	void *userdata;
-} audio;
-static void Audio_callback(void *userdata, Uint8 *stream, int len) {
-	(void)userdata;
-	
-	if (app.menu) {
-		SDL_memset(stream, 0, len);
-		return;
-	}
-	
-	if (audio.callback) audio.callback(audio.userdata, stream, len);
-	else SDL_memset(stream, 0, len);
-}
-
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
 	raw_mute();
-	
-	SDL_AudioSpec spec = *desired;
-	audio.callback = desired->callback;
-	audio.userdata = desired->userdata;
-	spec.callback = Audio_callback;
-	spec.userdata = NULL;
-	
-	int result = real_SDL_OpenAudio(&spec, obtained);
+	int result = real_SDL_OpenAudio(desired, obtained);
 	Settings_setVolume(settings.volume); // must be done here (or later)
 	return result;
 }
@@ -4572,6 +4563,17 @@ ssize_t read(int fd, void *buf, size_t count) {
 	return n;
 }
 
+int gettimeofday(struct timeval *tv, void *tz) {
+	int r = real_gettimeofday(tv, tz);
+	if (r == 0 && tv) {
+		uint64_t us = tv->tv_sec * 1000000ULL + tv->tv_usec;
+		us -= app.menu_us;
+		tv->tv_sec = us / 1000000ULL;
+		tv->tv_usec = us % 1000000ULL;
+	}
+	return r;
+}
+
 // --------------------------------------------
 // hijack main to modify args
 // --------------------------------------------
@@ -4618,6 +4620,7 @@ static void resolve_real(void) {
 	
 	real_open64 = dlsym(RTLD_NEXT, "open64");
 	real_read = dlsym(RTLD_NEXT, "read");
+	real_gettimeofday = dlsym(RTLD_NEXT, "gettimeofday");
 	
 	// hook SDL functions
 	real_SDL_Init = dlsym(RTLD_NEXT, "SDL_Init");
