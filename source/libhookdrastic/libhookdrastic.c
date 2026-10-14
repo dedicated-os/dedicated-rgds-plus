@@ -797,6 +797,11 @@ static struct {
 static void Audio_callback(void *userdata, Uint8 *stream, int len) {
 	(void)userdata;
 
+	if (app.menu) {
+		SDL_memset(stream, 0, len);
+		return;
+	}
+
 	audio.callback(audio.userdata, stream, len);
 	if (audio.mute) SDL_memset(stream, 0, len);
 }
