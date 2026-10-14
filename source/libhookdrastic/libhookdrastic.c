@@ -323,7 +323,6 @@ static struct {
 		snd_mixer_t *mix;
 		snd_mixer_elem_t *dac;
 	} hp;
-	
 	struct {
 		snd_mixer_t *mix;
 		snd_mixer_elem_t *dev0;
@@ -445,7 +444,6 @@ static void raw_spk(int enable) {
     snd_mixer_selem_set_enum_item(raw.spk.swi0, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
     snd_mixer_selem_set_enum_item(raw.spk.swi1, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
 }
-static int drastic_fast_forward(void); // oof
 static void raw_poll(void) {
     static uint32_t next = 0;
 
@@ -457,7 +455,7 @@ static void raw_poll(void) {
     if (jack == raw.jack) return;
 
     raw.jack = jack;
-    if (!drastic_fast_forward()) raw_spk(!jack);
+    raw_spk(!jack);
 }
 
 static void raw_vol(int value) { // 0-20, not really raw anymore
@@ -512,9 +510,6 @@ static void raw_vol(int value) { // 0-20, not really raw anymore
 	snd_mixer_selem_set_playback_volume_all(raw.hp.dac, hp_raw[value]);
 	snd_mixer_selem_set_playback_volume_all(raw.spk.dev0, spk_raw[value]);
 	snd_mixer_selem_set_playback_volume_all(raw.spk.dev1, spk_raw[value]);
-}
-static void raw_mute(void) {
-	raw_vol(0);
 }
 static void raw_bri(int value) {
 	setInt(raw.bri0, value);
@@ -576,7 +571,7 @@ static struct {
 };
 
 static void Settings_load(void) {
-	raw_mute();
+	raw_vol(0);
 	
 	if (access(paths.settings, F_OK)!=0) return;
 	
@@ -787,6 +782,23 @@ static void hexdump(const void *ptr, size_t len) {
 		printf("\n");
 	}
 	fflush(stdout);
+}
+
+// --------------------------------------------
+// audio
+// --------------------------------------------
+
+static struct {
+	void (*callback)(void *, Uint8 *, int);
+	void *userdata;
+	int mute;
+} audio;
+
+static void Audio_callback(void *userdata, Uint8 *stream, int len) {
+	(void)userdata;
+
+	audio.callback(audio.userdata, stream, len);
+	if (audio.mute) SDL_memset(stream, 0, len);
 }
 
 // --------------------------------------------
@@ -1084,7 +1096,7 @@ static void drastic_quit(void) {
 }
 
 static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) {
-	if (drastic_fast_forward()) return 0;
+	if (audio.mute) return 0;
 	Mic_init();
 	return Mic_getSample(timestamp);
 }
@@ -1828,7 +1840,7 @@ static int hangs_on_lid(void) {
 }
 
 static void Device_mute(int mute) {
-	if (mute) raw_mute();
+	if (mute) raw_vol(0);
 	else Settings_setVolume(settings.volume);
 	
 	if (raw.jack) raw_spk(0);
@@ -1892,7 +1904,7 @@ static void Device_idling(void) {
 			idle_at = SDL_GetTicks(); // keep on
 		}
 		else {
-			raw_mute();
+			raw_vol(0);
 			drastic_audio_pause(1);
 			unlink("/tmp/exec_loop");
 			drastic_quit();
@@ -1900,7 +1912,7 @@ static void Device_idling(void) {
 	}
 }
 static void Device_sleep(void) {
-	raw_mute();
+	raw_vol(0);
 	raw_bri(0);
 	raw_led(1);
 	raw_scr(0);
@@ -1986,7 +1998,7 @@ static void Device_poweroff(void) {
 	App_bye();
 	sleep(2);
 	
-	raw_mute();
+	raw_vol(0);
 	App_save(AUTO_STATE);
 	unlink("/tmp/exec_loop");
 	raw_bri(0);
@@ -2047,7 +2059,7 @@ static int Device_tick(void) {
 	int ff = drastic_fast_forward();
 	if (ff != last_ff) {
 		last_ff = ff;
-		Device_mute(ff);
+		audio.mute = ff;
 	}
 	
 	Pad_nextFrame();
@@ -4200,7 +4212,7 @@ static void App_menu(void) {
 	
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
-		if (!drastic_fast_forward()) Device_mute(0);
+		if (!audio.mute) Device_mute(0);
 		Mic_pause(0);
 
 		drastic_resync();
@@ -4235,7 +4247,7 @@ static void App_render(void) {
 		if (i==0) {
 			OSD_render(renderer);
 
-			if (drastic_fast_forward()) {
+			if (audio.mute) {
 				if (!app.xgl.icons) {
 					char path[MAX_PATH];
 					app.xgl.icons = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/icons.png"));
@@ -4383,34 +4395,34 @@ int SDL_PollEvent(SDL_Event* event) {
 			App_menu();
 			continue;
 		}
-
-		if (Pad_justPressed(PAD_BACK)) {
-			Pad_consume(PAD_BACK);
-			// app.fast_forward = !app.fast_forward;
-			// if (!drastic_fast_forward()) Device_mute(1);
-			// else Device_mute(0);
-		}
 		
 		// LOG_event(event);
-			switch (event->type) {
-				case SDL_FINGERDOWN:
-				case SDL_FINGERUP:
-				case SDL_FINGERMOTION: {
-					// TODO: maybe this has something to do with the dummy 2d renderer?
-					int x = raw_x / 2; // drastic is expecting SCREEN_WIDTH/2?
-					int y = raw_y; // but just SCREEN_HEIGHT?
-					event->tfinger.x = x;
-					event->tfinger.y = y;
-				} break;
-			}
+		switch (event->type) {
+			case SDL_FINGERDOWN:
+			case SDL_FINGERUP:
+			case SDL_FINGERMOTION: {
+				// TODO: maybe this has something to do with the dummy 2d renderer?
+				int x = raw_x / 2; // drastic is expecting SCREEN_WIDTH/2?
+				int y = raw_y; // but just SCREEN_HEIGHT?
+				event->tfinger.x = x;
+				event->tfinger.y = y;
+			} break;
+		}
 		
 		return result;
 	}
 }
 
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
-	raw_mute();
-	int result = real_SDL_OpenAudio(desired, obtained);
+	raw_vol(0);
+	
+	SDL_AudioSpec hijacked = *desired;
+	audio.callback = desired->callback;
+	audio.userdata = desired->userdata;
+	hijacked.callback = Audio_callback;
+	hijacked.userdata = NULL;
+	
+	int result = real_SDL_OpenAudio(&hijacked, obtained);
 	Settings_setVolume(settings.volume); // must be done here (or later)
 	return result;
 }
