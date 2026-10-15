@@ -1,7 +1,7 @@
 .PHONY: build
 
 BUILD_HASH:=$(shell git rev-parse --short HEAD)
-RELEASE_DIRT:=$(if $(shell git status --porcelain),-dirty,)
+RELEASE_DIRT:=$(if $(shell git status --porcelain; git log @{upstream}..HEAD --oneline),-dirty,)
 RELEASE_TIME:=$(shell TZ=GMT date +%Y%m%d)
 RELEASE_BETA=beta-
 RELEASE_BASE=dedicated-rgds-plus-$(RELEASE_BETA)$(RELEASE_TIME)
@@ -11,8 +11,8 @@ RELEASE_NAME=$(RELEASE_BASE)-$(RELEASE_DOT)$(RELEASE_DIRT)
 all: setup build package done
 
 setup:
-	# make sure we're running in an input device
-	tty -s 
+	@echo "$(RELEASE_NAME) starting..."
+	tty -s # make sure we're running in an input device
 	rm -rf ./build
 	mkdir -p ./releases
 	cp -R ./skeleton ./build
