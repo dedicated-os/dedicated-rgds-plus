@@ -210,8 +210,7 @@ static struct {
 		XGL_Texture *icons;
 		XGL_Texture *meters;
 		XGL_Texture *notches;
-		XGL_Shader *near;
-		XGL_Shader *grid;
+		XGL_Texture *grid;
 	} xgl;
 	
 	SDL_Rect rects[SCREEN_COUNT];
@@ -2658,12 +2657,15 @@ static void App_focus(int current, int snap) {
 	App_preview(current,1, snap);
 }
 
+static void App_grid(XGL_Renderer *renderer) {
+	if (settings.grid) XGL_RenderRepeat(renderer, app.xgl.grid, NULL);
+}
+
 static void App_background(int screen) {
 	XGL_Renderer *renderer = app.xgl.renderers[screen];
-	if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 	XGL_RenderCopy(renderer, app.xgl.previews[screen], NULL, NULL);
+	App_grid(renderer);
 	XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,screen*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
-	if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
 }
 
 static void App_top(int hud) {
@@ -2711,9 +2713,8 @@ static void App_bye(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 
 		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
+		App_grid(renderer);
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
 		if (i==0) {
@@ -2739,9 +2740,8 @@ static void App_empty(void) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
 
 		XGL_SetRenderDrawColor(renderer, MID_TRIAD,0xff);
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderFillRect(renderer, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT});
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
+		App_grid(renderer);
 		XGL_RenderCopy(renderer, app.xgl.overlay, &(SDL_Rect){0,i*SCREEN_HEIGHT,1,SCREEN_HEIGHT}, NULL);
 		
 		if (i==0) {
@@ -2898,9 +2898,8 @@ static void App_init(void) {
 	char path[MAX_PATH];
 	app.xgl.meters = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/meters.png"));
 	app.xgl.notches = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/notches.png"));
-	
-	app.xgl.near = XGL_GetDefaultTextureShader(renderer);
-	app.xgl.grid = XGL_CreateGridShader(renderer);
+
+	app.xgl.grid = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/grid.png"));
 	
 	SDL_Log("video driver: %s", SDL_GetCurrentVideoDriver());
 
@@ -2920,14 +2919,12 @@ static void App_quit(void) {
 	
 	XGL_DestroyTexture(app.xgl.meters);
 	XGL_DestroyTexture(app.xgl.notches);
+	XGL_DestroyTexture(app.xgl.grid);
 	
 	if (app.xgl.icons) 		XGL_DestroyTexture(app.xgl.icons);
 	if (app.xgl.overlay) 	XGL_DestroyTexture(app.xgl.overlay);
 	if (app.xgl.previews[0]) XGL_DestroyTexture(app.xgl.previews[0]);
 	if (app.xgl.previews[1]) XGL_DestroyTexture(app.xgl.previews[1]);
-	
-	// XGL_DestroyShader(app.xgl.near);
-	XGL_DestroyShader(app.xgl.grid);
 	
 	close(app.bat);
 	close(app.usb);
@@ -4012,9 +4009,9 @@ static uint64_t time_us(void) {
 
 static void App_menu(void) {
 	uint64_t open_us = time_us();
+	app.menu = 1;
 	
 	SDL_Log("enter menu");
-	app.menu = 1;
 	Mic_pause(1);
 	Device_mute(1);
 	putString(CPU_PATH "scaling_setspeed", FREQ_MENU);
@@ -4245,9 +4242,8 @@ static void App_render(void) {
 	
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_Renderer *renderer = app.xgl.renderers[i];
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.grid);
 		XGL_RenderCopy(renderer, app.xgl.screens[i], NULL, NULL);
-		if (settings.grid) XGL_SetRenderShader(renderer, app.xgl.near);
+		App_grid(renderer);
 		
 		if (i==0) {
 			OSD_render(renderer);
@@ -4324,6 +4320,11 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 	
 	App_render(); // complete render takeover
 
+	if (Pad_justReleased(PAD_MENU)) {
+		App_menu();
+		return;
+	}
+
 	// no before-drastic-frame hook so call this 
 	// as late as possible so it's ready at the 
 	// beginning of the next frame
@@ -4392,14 +4393,7 @@ int SDL_PollEvent(SDL_Event* event) {
 		
 		if (Device_handleEvent(event)) continue;
 		
-		if (Pad_justPressed(PAD_MENU)) {
-			continue;
-		}
-		
-		if (Pad_justReleased(PAD_MENU)) {
-			App_menu();
-			continue;
-		}
+		if (Pad_justPressed(PAD_MENU)) continue;
 		
 		// LOG_event(event);
 		switch (event->type) {
@@ -4417,7 +4411,6 @@ int SDL_PollEvent(SDL_Event* event) {
 		return result;
 	}
 }
-
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
 	raw_vol(0);
 	
@@ -4426,12 +4419,12 @@ int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
 	audio.userdata = desired->userdata;
 	hijacked.callback = Audio_callback;
 	hijacked.userdata = NULL;
+	// hijacked.samples = 256;
 	
 	int result = real_SDL_OpenAudio(&hijacked, obtained);
 	Settings_setVolume(settings.volume); // must be done here (or later)
 	return result;
 }
-
 void SDL_Delay(uint32_t ms) {
 	if (ms>16) {
 		SDL_Log("excessive SDL_Delay(%i)!", ms);

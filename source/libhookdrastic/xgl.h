@@ -43,6 +43,7 @@ int XGL_RenderClear(XGL_Renderer *renderer);
 int XGL_RenderFillRect(XGL_Renderer *renderer, const SDL_Rect *rect);
 int XGL_RenderFillRects(XGL_Renderer *renderer, const SDL_Rect *rects, int count);
 int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *src, const SDL_Rect *dst);
+int XGL_RenderRepeat(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *dst);
 int XGL_RenderReadPixels(XGL_Renderer *renderer, const SDL_Rect *rect, Uint32 format, void *pixels, int pitch);
 void XGL_RenderPresent(XGL_Renderer *renderer);
 

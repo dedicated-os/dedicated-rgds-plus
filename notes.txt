@@ -1,13 +1,13 @@
 CHANGE LOG
 
-- initial release
+- fixed audio stutter when loading games, exiting the menu, and exiting fast forward
 
 ----------------------------------------
 
 [x] add settings.grid toggle (MENU+L2)
 	add to hints?
-[ ] stutter when leaving menu is back?
-[ ] stutter when leaving ff
+[x] stutter when leaving menu is back?
+[x] stutter when leaving ff
 [/] increase type/icon size 1.5x
 
 ----------------------------------------

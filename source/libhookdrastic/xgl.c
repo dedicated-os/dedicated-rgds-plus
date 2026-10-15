@@ -57,6 +57,11 @@ struct XGL_Texture {
 	SDL_bool locked;
 };
 
+typedef enum XGL_RenderMode {
+	XGL_RENDER_COPY,
+	XGL_RENDER_REPEAT
+} XGL_RenderMode;
+
 typedef struct XGL_Vertex {
 	GLfloat x;
 	GLfloat y;
@@ -914,7 +919,7 @@ int XGL_RenderFillRect(XGL_Renderer *renderer, const SDL_Rect *rect) {
 	return XGL_RenderFillRects(renderer, &output_rect, 1);
 }
 
-int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *src, const SDL_Rect *dst) {
+static int XGL_RenderTexture(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *src, const SDL_Rect *dst, XGL_RenderMode mode) {
 	SDL_Rect src_rect;
 	SDL_Rect dst_rect;
 	XGL_Shader *shader;
@@ -929,13 +934,13 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 	XGL_Vertex vertices[6];
 
 	if (!texture) {
-		SDL_SetError("XGL_RenderCopy: texture is NULL");
+		SDL_SetError("XGL_RenderTexture: texture is NULL");
 		return -1;
 	}
 	if (XGL_SetCurrentRenderer(renderer) != 0 || XGL_UpdateRendererOutputSize(renderer) != 0) {
 		return -1;
 	}
-	shader = renderer->current_shader ? renderer->current_shader : renderer->default_shader;
+	shader = mode==XGL_RENDER_REPEAT ? renderer->default_shader : (renderer->current_shader ? renderer->current_shader : renderer->default_shader);
 
 	if (src) {
 		src_rect = *src;
@@ -946,7 +951,7 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 		src_rect.h = texture->h;
 	}
 	if (src_rect.x < 0 || src_rect.y < 0 || src_rect.w <= 0 || src_rect.h <= 0 || src_rect.x + src_rect.w > texture->w || src_rect.y + src_rect.h > texture->h) {
-		SDL_SetError("XGL_RenderCopy: invalid source rectangle");
+		SDL_SetError("XGL_RenderTexture: invalid source rectangle");
 		return -1;
 	}
 
@@ -966,10 +971,17 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 	y0 = (GLfloat)dst_rect.y;
 	x1 = (GLfloat)(dst_rect.x + dst_rect.w);
 	y1 = (GLfloat)(dst_rect.y + dst_rect.h);
-	u0 = (GLfloat)src_rect.x / (GLfloat)texture->w;
-	v0 = (GLfloat)src_rect.y / (GLfloat)texture->h;
-	u1 = (GLfloat)(src_rect.x + src_rect.w) / (GLfloat)texture->w;
-	v1 = (GLfloat)(src_rect.y + src_rect.h) / (GLfloat)texture->h;
+	if (mode==XGL_RENDER_REPEAT) {
+		u0 = (GLfloat)dst_rect.x / (GLfloat)texture->w;
+		v0 = (GLfloat)dst_rect.y / (GLfloat)texture->h;
+		u1 = (GLfloat)(dst_rect.x + dst_rect.w) / (GLfloat)texture->w;
+		v1 = (GLfloat)(dst_rect.y + dst_rect.h) / (GLfloat)texture->h;
+	} else {
+		u0 = (GLfloat)src_rect.x / (GLfloat)texture->w;
+		v0 = (GLfloat)src_rect.y / (GLfloat)texture->h;
+		u1 = (GLfloat)(src_rect.x + src_rect.w) / (GLfloat)texture->w;
+		v1 = (GLfloat)(src_rect.y + src_rect.h) / (GLfloat)texture->h;
+	}
 
 	vertices[0] = (XGL_Vertex){ x0, y0, u0, v0 };
 	vertices[1] = (XGL_Vertex){ x1, y0, u1, v0 };
@@ -984,6 +996,10 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 	glBindTexture(GL_TEXTURE_2D, texture->id);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, shader->linear_filter ? GL_LINEAR : GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, shader->linear_filter ? GL_LINEAR : GL_NEAREST);
+	if (mode==XGL_RENDER_REPEAT) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
 	glUniform1i(shader->uniform_texture, 0);
 	glUniform2f(shader->uniform_view_size, (GLfloat)renderer->output_w, (GLfloat)renderer->output_h);
 	if (shader->uniform_output_size >= 0) {
@@ -1017,8 +1033,20 @@ int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect 
 	glDisableVertexAttribArray(shader->attr_position);
 	glDisableVertexAttribArray(shader->attr_texcoord);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	if (mode==XGL_RENDER_REPEAT) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
 
 	return 0;
+}
+
+int XGL_RenderCopy(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *src, const SDL_Rect *dst) {
+	return XGL_RenderTexture(renderer, texture, src, dst, XGL_RENDER_COPY);
+}
+
+int XGL_RenderRepeat(XGL_Renderer *renderer, XGL_Texture *texture, const SDL_Rect *dst) {
+	return XGL_RenderTexture(renderer, texture, NULL, dst, XGL_RENDER_REPEAT);
 }
 
 int XGL_RenderReadPixels(XGL_Renderer *renderer, const SDL_Rect *rect, Uint32 format, void *pixels, int pitch) {
