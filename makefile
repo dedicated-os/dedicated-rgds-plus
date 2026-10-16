@@ -11,7 +11,7 @@ RELEASE_NAME=$(RELEASE_BASE)-$(RELEASE_DOT)$(RELEASE_DIRT)
 all: setup build package done
 
 setup:
-	@echo "$(RELEASE_NAME) starting..."
+	@echo "building $(RELEASE_NAME)..."
 	tty -s # make sure we're running in an input device
 	rm -rf ./build
 	mkdir -p ./releases

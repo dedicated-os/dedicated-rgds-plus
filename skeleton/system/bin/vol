@@ -1,4 +1,0 @@
-#!/bin/sh
-
-# non-plus
-tinymix set 14 $1 $1
