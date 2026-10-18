@@ -261,6 +261,15 @@ static int raw_x,raw_y; // touch screen fix
 // support
 // --------------------------------------------
 
+static void dmesg(const char *msg) {
+	char buffer[MAX_LINE];
+	snprintf(buffer, sizeof(buffer), "<6>dedicated: %s\n", msg);
+	int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+	if (fd<0) return;
+	write(fd, buffer, strlen(buffer));
+	close(fd);
+}
+
 static inline void touch(const char *path) {
 	int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
 	if (fd >= 0) close(fd);
@@ -4226,6 +4235,7 @@ static void App_menu(void) {
 	app.menu = 0;
 }
 
+static int rendered_first_frame = 0;
 static int render_drastic_menu = 0;
 static void App_render(void) {
 	if (idling) {
@@ -4262,6 +4272,11 @@ static void App_render(void) {
 	if (app.capture) App_capture("game");
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_RenderPresent(app.xgl.renderers[i]);
+	}
+	
+	if (!rendered_first_frame) {
+		dmesg("rendered_first_frame");
+		rendered_first_frame = 1;
 	}
 }
 
@@ -4681,6 +4696,7 @@ static int override_args(int argc, char **argv, char **envp) {
 }
 
 int __libc_start_main(int (*main)(int,char**,char**), int argc, char **ubp_av, void (*init)(void), void (*fini)(void), void (*rtld_fini)(void), void *stack_end) {
+	dmesg("__libc_start_main");
 	hook();
 	drastic_main = main;
 	return real__libc_start_main(override_args, argc, ubp_av, init, fini, rtld_fini, stack_end);
