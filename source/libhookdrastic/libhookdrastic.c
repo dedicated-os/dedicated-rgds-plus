@@ -340,7 +340,66 @@ static struct {
 	} spk;
 } raw;
 
+static void raw_mixer_init(snd_mixer_t **mix, const char *card, const char *const *names, snd_mixer_elem_t **elems, int count) {
+	// I hate audio code
+	snd_mixer_selem_id_t *sid;
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, 0);
+	for (int waiting=0;; waiting=1) {
+		int err, i=0;
+		if ((err=snd_mixer_open(mix, 0))>=0 &&
+			(err=snd_mixer_attach(*mix, card))>=0 &&
+			(err=snd_mixer_selem_register(*mix, NULL, NULL))>=0 &&
+			(err=snd_mixer_load(*mix))>=0) {
+			for (; i<count; i++) {
+				snd_mixer_selem_id_set_name(sid, names[i]);
+				if (!(elems[i]=snd_mixer_find_selem(*mix, sid))) break;
+			}
+			if (i==count) {
+				if (waiting) {
+					char msg[MAX_LINE];
+					sprintf(msg, "mixer %s ready", card);
+					dmesg(msg);
+				}
+				return;
+			}
+		}
+		if (!waiting) {
+			char msg[MAX_LINE];
+			sprintf(msg, "waiting for mixer %s: %s", card, err<0 ? snd_strerror(err) : names[i]);
+			dmesg(msg);
+		}
+		if (*mix) snd_mixer_close(*mix);
+		*mix = NULL;
+		usleep(20000);
+	}
+}
 static void raw_poll(void);
+static void raw_audio_init(void) {
+	if (raw.spk.swi1) return;
+
+	snd_mixer_elem_t *hp[1], *spk[4];
+	const char *hp_names[] = {
+		"DAC"
+	};
+	const char *spk_names[] = {
+		"aw_dev_0_rx_volume",
+		"aw_dev_1_rx_volume",
+		"aw_dev_0_switch",
+		"aw_dev_1_switch"
+	};
+	raw_mixer_init(&raw.hp.mix, "hw:0", hp_names, hp, 1);
+	raw.hp.dac = hp[0];
+	raw_mixer_init(&raw.spk.mix, "hw:1", spk_names, spk, 4);
+	raw.spk.dev0 = spk[0];
+	raw.spk.dev1 = spk[1];
+	raw.spk.swi0 = spk[2];
+	raw.spk.swi1 = spk[3];
+	
+	raw.jack = -1;
+	raw_poll();
+}
+
 static void raw_init(void) {
 	raw.bri0 = open("/sys/class/backlight/backlight1/brightness", O_WRONLY | O_CLOEXEC);
 	raw.bri1 = open("/sys/class/backlight/backlight/brightness", O_WRONLY | O_CLOEXEC);
@@ -393,49 +452,6 @@ static void raw_init(void) {
 		}
 	}
 	
-	// I hate audio code
-	snd_mixer_open(&raw.hp.mix, 0);
-	snd_mixer_attach(raw.hp.mix, "hw:0");
-	snd_mixer_selem_register(raw.hp.mix, NULL, NULL);
-	snd_mixer_load(raw.hp.mix);
-
-	snd_mixer_open(&raw.spk.mix, 0);
-	snd_mixer_attach(raw.spk.mix, "hw:1");
-	snd_mixer_selem_register(raw.spk.mix, NULL, NULL);
-	snd_mixer_load(raw.spk.mix);
-
-	snd_mixer_selem_id_t *sid;
-	snd_mixer_selem_id_alloca(&sid);
-	snd_mixer_selem_id_set_index(sid, 0);
-	snd_mixer_selem_id_set_name(sid, "DAC");
-	raw.hp.dac = snd_mixer_find_selem(raw.hp.mix, sid);
-
-	snd_mixer_selem_id_t *sid0;
-	snd_mixer_selem_id_alloca(&sid0);
-	snd_mixer_selem_id_set_index(sid0, 0);
-	snd_mixer_selem_id_set_name(sid0, "aw_dev_0_rx_volume");
-	raw.spk.dev0 = snd_mixer_find_selem(raw.spk.mix, sid0);
-
-	snd_mixer_selem_id_t *sid1;
-	snd_mixer_selem_id_alloca(&sid1);
-	snd_mixer_selem_id_set_index(sid1, 0);
-	snd_mixer_selem_id_set_name(sid1, "aw_dev_1_rx_volume");
-	raw.spk.dev1 = snd_mixer_find_selem(raw.spk.mix, sid1);
-	
-	snd_mixer_selem_id_t *sid2;
-	snd_mixer_selem_id_alloca(&sid2);
-	snd_mixer_selem_id_set_index(sid2, 0);
-	snd_mixer_selem_id_set_name(sid2, "aw_dev_0_switch");
-	raw.spk.swi0 = snd_mixer_find_selem(raw.spk.mix, sid2);
-
-	snd_mixer_selem_id_t *sid3;
-	snd_mixer_selem_id_alloca(&sid3);
-	snd_mixer_selem_id_set_index(sid3, 0);
-	snd_mixer_selem_id_set_name(sid3, "aw_dev_1_switch");
-	raw.spk.swi1 = snd_mixer_find_selem(raw.spk.mix, sid3);
-	
-	raw.jack = -1;
-	raw_poll();
 }
 static void raw_quit(void) {
 	close(raw.bri0);
@@ -444,15 +460,19 @@ static void raw_quit(void) {
 	close(raw.led1);
 	close(raw.drm);
 	close(raw.jck);
-	snd_mixer_close(raw.hp.mix);
-	snd_mixer_close(raw.spk.mix);
+	if (raw.hp.mix) snd_mixer_close(raw.hp.mix);
+	if (raw.spk.mix) snd_mixer_close(raw.spk.mix);
 }
 
 static void raw_spk(int enable) {
+    if (!raw.spk.swi1) return;
+	
     snd_mixer_selem_set_enum_item(raw.spk.swi0, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
     snd_mixer_selem_set_enum_item(raw.spk.swi1, SND_MIXER_SCHN_MONO, enable ? 1 : 0);
 }
 static void raw_poll(void) {
+    if (!raw.spk.swi1) return;
+	
     static uint32_t next = 0;
 
     uint32_t now = SDL_GetTicks();
@@ -467,6 +487,8 @@ static void raw_poll(void) {
 }
 
 static void raw_vol(int value) { // 0-20, not really raw anymore
+	if (!raw.spk.swi1) return;
+	
 	static const uint8_t hp_raw[21] = {
 		  0, // mute
 		128, // 0
@@ -579,8 +601,6 @@ static struct {
 };
 
 static void Settings_load(void) {
-	raw_vol(0);
-	
 	if (access(paths.settings, F_OK)!=0) return;
 	
 	FILE* file = fopen(paths.settings, "rb");
@@ -4428,6 +4448,8 @@ int SDL_PollEvent(SDL_Event* event) {
 	}
 }
 int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
+	dmesg("SDL_OpenAudio");
+	raw_audio_init();
 	raw_vol(0);
 	
 	SDL_AudioSpec hijacked = *desired;
