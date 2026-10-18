@@ -49,7 +49,7 @@ XGL_Texture *XGL_LoadTexture(XGL_Renderer *renderer, const char *path) {
 
 #define CEIL_TO(x, n) (((x) + (n) - 1) / (n) * (n))
 #define NUMBER_OF(items) (sizeof(items) / sizeof((items)[0]))
-#define LOG(...) printf(__VA_ARGS__); printf("\n"); fflush(stdout)
+#define LOG(...) do { printf(__VA_ARGS__); printf("\n"); fflush(stdout); } while (0)
 
 #define MAX_LINE 1024
 #define MAX_PATH 512

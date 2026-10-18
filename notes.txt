@@ -9,6 +9,13 @@ CHANGE LOG
 [x] stutter when leaving menu is back?
 [x] stutter when leaving ff
 [/] increase type/icon size 1.5x
+[ ] archive left right don't jump correct number of rows
+	it's moving the edge of the view, not the top
+
+----------------------------------------
+
+https://github.com/beebono/DSperate
+https://github.com/SapphireRhodonite/SeedlessDS-Core
 
 ----------------------------------------
 
