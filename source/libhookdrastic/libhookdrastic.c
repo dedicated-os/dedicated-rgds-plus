@@ -176,6 +176,18 @@ enum {
 
 #define KEY_LID		'l'
 
+
+// --------------------------------------------
+
+typedef struct {
+	XGL_Texture *texture;
+	int claimed;
+} DummyTexture;
+
+typedef struct {
+	SDL_Window *window;
+} DummyRenderer;
+
 // --------------------------------------------
 
 typedef enum {
@@ -189,13 +201,6 @@ typedef struct {
 	int hidden;
 } Entry;
 
-typedef enum {
-	SHADER_NEAR,
-	SHADER_GRID,
-
-	SHADER_COUNT
-} Shader;
-
 static struct {
 	uintptr_t base;
 	
@@ -206,7 +211,6 @@ static struct {
 		XGL_Texture *screens[SCREEN_COUNT];
 		XGL_Texture *previews[SCREEN_COUNT];
 		XGL_Texture *overlay;
-		XGL_Texture *drastic_menu;
 		XGL_Texture *icons;
 		XGL_Texture *meters;
 		XGL_Texture *notches;
@@ -216,10 +220,9 @@ static struct {
 	SDL_Rect rects[SCREEN_COUNT];
 	
 	struct {
-		SDL_Renderer* renderers[SCREEN_COUNT];
-		SDL_Texture* screens[SCREEN_COUNT];
-		SDL_Texture* drastic_menu;
-		int claimed[SCREEN_COUNT];
+		DummyRenderer renderers[SCREEN_COUNT];
+		DummyTexture screens[SCREEN_COUNT];
+		DummyTexture ignored;
 	} dummy;
 	
 	int count;
@@ -644,16 +647,6 @@ static void Settings_setBrightness(int value) {
 static int (*real_SDL_Init)(Uint32) = NULL;
 static SDL_Window* (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) = NULL;
 static void (*real_SDL_SetWindowSize)(SDL_Window *, int, int) = NULL;
-static int (*real_SDL_RenderSetLogicalSize)(SDL_Renderer*, int, int) = NULL;
-static SDL_Renderer* (*real_SDL_CreateRenderer)(SDL_Window*, int, Uint32) = NULL;
-static int (*real_SDL_RenderClear)(SDL_Renderer *) = NULL;
-static void (*real_SDL_RenderPresent)(SDL_Renderer*) = NULL;
-static SDL_Texture* (*real_SDL_CreateTexture)(SDL_Renderer*, Uint32, int, int, int) = NULL;
-static int (*real_SDL_LockTexture)(SDL_Texture * texture, const SDL_Rect * rect, void **pixels, int *pitch) = NULL;
-static void (*real_SDL_UnlockTexture)(SDL_Texture * texture) = NULL;
-static int (*real_SDL_UpdateTexture)(SDL_Texture * texture, const SDL_Rect * rect, const void *pixels, int pitch) = NULL;
-static void (*real_SDL_DestroyTexture)(SDL_Texture *) = NULL;
-static int (*real_SDL_RenderCopy)(SDL_Renderer*, SDL_Texture*, const SDL_Rect*, const SDL_Rect*) = NULL;
 static int (*real_SDL_OpenAudio)(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) = NULL;
 static int (*real_SDL_PollEvent)(SDL_Event*) = NULL;
 static void (*real_SDL_Delay)(uint32_t) = NULL;
@@ -2914,16 +2907,11 @@ static void App_init(void) {
 		app.xgl.renderers[i] = renderer;
 		app.xgl.screens[i] = screen;
 		
-		SDL_Renderer *sdl_renderer = real_SDL_CreateRenderer(window, -1, 0);
-		SDL_Texture *sdl_screen = real_SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DS_WIDTH, DS_HEIGHT);
-		
-		app.dummy.renderers[i] = sdl_renderer;
-		app.dummy.screens[i] = sdl_screen;
+		app.dummy.renderers[i] = (DummyRenderer){.window = window};
+		app.dummy.screens[i] = (DummyTexture){.texture = screen};
 	}
 	
 	XGL_Renderer *renderer = app.xgl.renderers[0];	
-	app.xgl.drastic_menu = XGL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, XGL_TEXTUREACCESS_STREAMING, 800,480);
-	app.dummy.drastic_menu = real_SDL_CreateTexture(app.dummy.renderers[0], SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, 800,480);
 	
 	char path[MAX_PATH];
 	app.xgl.meters = XGL_LoadTexture(renderer, Path_concat(path, paths.assets, "/meters.png"));
@@ -2963,17 +2951,10 @@ static void App_quit(void) {
 	TimeZone_quit();
 	Fonts_quit();
 	
-	SDL_DestroyTexture(app.dummy.drastic_menu);
-	XGL_DestroyTexture(app.xgl.drastic_menu);
-	
 	// drastic never destroys renderers or windows so this is safe
 	for (int i=0; i<SCREEN_COUNT; i++) {
 		XGL_DestroyTexture(app.xgl.screens[i]);
 		XGL_DestroyRenderer(app.xgl.renderers[i]);
-
-		SDL_DestroyTexture(app.dummy.screens[i]);
-		SDL_DestroyRenderer(app.dummy.renderers[i]);
-
 		SDL_GL_DeleteContext(app.xgl.contexts[i]);
 		SDL_DestroyWindow(app.xgl.windows[i]);
 	}
@@ -4256,18 +4237,9 @@ static void App_menu(void) {
 }
 
 static int rendered_first_frame = 0;
-static int render_drastic_menu = 0;
 static void App_render(void) {
 	if (idling) {
 		real_SDL_Delay(1); // drastic paces itself
-		return;
-	}
-	
-	if (render_drastic_menu) {
-		render_drastic_menu = 0;
-		XGL_Renderer *renderer = app.xgl.renderers[0];
-		XGL_RenderCopy(renderer, app.xgl.drastic_menu, &(SDL_Rect){0,0,SCREEN_WIDTH,SCREEN_HEIGHT}, NULL);
-		XGL_RenderPresent(renderer);
 		return;
 	}
 	
@@ -4318,17 +4290,33 @@ void SDL_SetWindowSize(SDL_Window* window, int w, int h) {
 }
 
 SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, int index, Uint32 flags) {
-	return app.dummy.renderers[0]; // created in App_init
+	for (int i=0; i<SCREEN_COUNT; i++) {
+		if (window == app.dummy.renderers[i].window) return (SDL_Renderer *)&app.dummy.renderers[i];
+	}
+	return NULL;
 }
 int SDL_RenderSetLogicalSize(SDL_Renderer *renderer, int w, int h) {
-	return 1; // complete render takeover
+	return 0; // complete render takeover
+}
+void SDL_RenderGetLogicalSize(SDL_Renderer *renderer, int *w, int *h) {
+	// unused
+	if (w) *w = 0;
+	if (h) *h = 0;
+}
+int SDL_SetRenderDrawColor(SDL_Renderer *renderer, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+	return 0; // complete render takeover
+}
+int SDL_SetRenderDrawBlendMode(SDL_Renderer *renderer, SDL_BlendMode mode) {
+	return 0; // complete render takeover
+}
+int SDL_SetTextureBlendMode(SDL_Texture *texture, SDL_BlendMode mode) {
+	return 0; // complete render takeover
 }
 int SDL_RenderClear(SDL_Renderer* renderer) {
-	return 1; // complete render takeover
+	return 0; // complete render takeover
 }
 int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture  *texture, const SDL_Rect *srcrect, const SDL_Rect *dstrect) {
-	if (texture==app.dummy.drastic_menu) render_drastic_menu = 1;
-	return 1; // complete render takeover
+	return 0; // complete render takeover
 }
 void SDL_RenderPresent(SDL_Renderer *_) {
 	if (loader.state!=LOADER_IDLE) {
@@ -4368,58 +4356,32 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 }
 
 SDL_Texture *SDL_CreateTexture(SDL_Renderer *renderer, Uint32 format, int type, int w, int h) {
-	// SDL_Log("SDL_CreateTexture(%s, %i,%i)", SDL_GetPixelFormatName(format), w,h);
-	SDL_Texture *texture = NULL;
 	if (type==SDL_TEXTUREACCESS_STREAMING && w==DS_WIDTH && h==DS_HEIGHT) {
-		if (!app.dummy.claimed[0]) {
-			app.dummy.claimed[0] = 1;
-			texture = app.dummy.screens[0];
-		}
-		else if (!app.dummy.claimed[1]) {
-			app.dummy.claimed[1] = 1;
-			texture = app.dummy.screens[1];
-		}
-	}
-	else {
-		if (w==800 && h==480) {
-			texture = app.dummy.drastic_menu;
+		for (int i=0; i<SCREEN_COUNT; i++) {
+			DummyTexture *dummy = &app.dummy.screens[i];
+			if (!dummy->claimed) {
+				dummy->claimed = 1;
+				return (SDL_Texture *)dummy;
+			}
 		}
 	}
-	if (!texture) {
-		texture = real_SDL_CreateTexture(renderer, format, type, w, h);
-	}
-	return texture;
+	return (SDL_Texture *)&app.dummy.ignored;
 }
 int SDL_LockTexture(SDL_Texture * texture, const SDL_Rect * rect, void **pixels, int *pitch) {
-	if (texture==app.dummy.screens[0]) {
-		return XGL_LockTexture(app.xgl.screens[0], rect, pixels, pitch);
-	}
-	else if (texture==app.dummy.screens[1]) {
-		return XGL_LockTexture(app.xgl.screens[1], rect, pixels, pitch);
-	}
-	return real_SDL_LockTexture(texture, rect, pixels, pitch); // doesn't matter
+	DummyTexture *dummy = (DummyTexture *)texture;
+	if (!dummy || !dummy->texture) return SDL_SetError("invalid texture lock");
+	return XGL_LockTexture(dummy->texture, rect, pixels, pitch);
 }
 void SDL_UnlockTexture(SDL_Texture * texture) {
-	if (texture==app.dummy.screens[0]) {
-		return XGL_UnlockTexture(app.xgl.screens[0]);
-	}
-	else if (texture==app.dummy.screens[1]) {
-		return XGL_UnlockTexture(app.xgl.screens[1]);
-	}
-	return real_SDL_UnlockTexture(texture); // doesn't matter
+	DummyTexture *dummy = (DummyTexture *)texture;
+	if (dummy && dummy->texture) XGL_UnlockTexture(dummy->texture);
 }
 int SDL_UpdateTexture(SDL_Texture * texture, const SDL_Rect * rect, const void *pixels, int pitch) {
-	if (texture==app.dummy.drastic_menu) {
-		return XGL_UpdateTexture(app.xgl.drastic_menu, rect, pixels, pitch);
-	}
-	return real_SDL_UpdateTexture(texture, rect, pixels, pitch); // doesn't matter
+	return 0;
 }
 void SDL_DestroyTexture(SDL_Texture *texture) {
-	// if (texture==app.dummy.screens[0]) app.dummy.screens[0] = NULL;
-	// else if (texture==app.dummy.screens[1]) app.dummy.screens[1] = NULL;
-	// else if (texture==app.dummy.drastic_menu) app.dummy.drastic_menu = NULL;
-	// real_SDL_DestroyTexture(texture);
-	// no-op now
+	DummyTexture *dummy = (DummyTexture *)texture;
+	if (dummy) dummy->claimed = 0;
 }
 
 int SDL_PollEvent(SDL_Event* event) {
@@ -4675,18 +4637,6 @@ static void resolve_real(void) {
 	
 	real_SDL_CreateWindow = dlsym(RTLD_NEXT, "SDL_CreateWindow");
 	real_SDL_SetWindowSize = dlsym(RTLD_NEXT, "SDL_SetWindowSize");
-	
-	real_SDL_CreateRenderer = dlsym(RTLD_NEXT, "SDL_CreateRenderer");
-	real_SDL_RenderSetLogicalSize = dlsym(RTLD_NEXT, "SDL_RenderSetLogicalSize");
-	real_SDL_RenderClear = dlsym(RTLD_NEXT, "SDL_RenderClear");
-	real_SDL_RenderCopy = dlsym(RTLD_NEXT, "SDL_RenderCopy");
-	real_SDL_RenderPresent = dlsym(RTLD_NEXT, "SDL_RenderPresent");
-	
-	real_SDL_CreateTexture = dlsym(RTLD_NEXT, "SDL_CreateTexture");
-	real_SDL_LockTexture = dlsym(RTLD_NEXT, "SDL_LockTexture");
-	real_SDL_UnlockTexture = dlsym(RTLD_NEXT, "SDL_UnlockTexture");
-	real_SDL_UpdateTexture = dlsym(RTLD_NEXT, "SDL_UpdateTexture");
-	real_SDL_DestroyTexture = dlsym(RTLD_NEXT, "SDL_DestroyTexture");
 	
 	real_SDL_PollEvent = dlsym(RTLD_NEXT, "SDL_PollEvent");
 	
