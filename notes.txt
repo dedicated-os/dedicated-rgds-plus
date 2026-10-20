@@ -11,6 +11,7 @@ CHANGE LOG
 [/] increase type/icon size 1.5x
 [ ] archive left right don't jump correct number of rows
 	it's moving the edge of the view, not the top
+[x] ff/mute state can desync
 
 ----------------------------------------
 

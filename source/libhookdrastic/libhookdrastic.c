@@ -4225,9 +4225,8 @@ static void App_menu(void) {
 	
 	putString(CPU_PATH "scaling_setspeed", FREQ_GAME);
 	if (loader.state==LOADER_IDLE) {
-		if (!audio.mute) Device_mute(0);
+		Device_mute(0);
 		Mic_pause(0);
-
 		drastic_resync();
 	}
 	SDL_Log("exit menu");
