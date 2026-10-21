@@ -1,17 +1,13 @@
 CHANGE LOG
 
-- fixed audio stutter when loading games, exiting the menu, and exiting fast forward
+- reduced runtime overhead
+- fixed fast-forward/mute desync
 
 ----------------------------------------
 
-[x] add settings.grid toggle (MENU+L2)
-	add to hints?
-[x] stutter when leaving menu is back?
-[x] stutter when leaving ff
 [/] increase type/icon size 1.5x
 [ ] archive left right don't jump correct number of rows
 	it's moving the edge of the view, not the top
-[x] ff/mute state can desync
 
 ----------------------------------------
 

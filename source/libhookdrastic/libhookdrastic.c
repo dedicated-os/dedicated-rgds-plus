@@ -1021,7 +1021,7 @@ static struct {
 } loader = {LOADER_AWAITING,LOADER_RESUME};
 
 // --------------------------------------------
-// drastic shims
+// drastic shims (ui)
 // --------------------------------------------
 
 #define PTR_AT(ptr) (void*)(*(uintptr_t *)(ptr))
@@ -1126,6 +1126,88 @@ static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) 
 	Mic_init();
 	return Mic_getSample(timestamp);
 }
+
+// --------------------------------------------
+// drastic patches (emulation)
+// --------------------------------------------
+
+#define PATCH_HOOK __attribute__((visibility("hidden")))
+#define PATCH_IMPL __attribute__((used))
+
+; // fixes TextMate's syntax coloring :lolsob: after above macros
+
+// drastic rounds texture interpolation too early, corrupting text, 
+// so patch constant-depth rendering to calculate exact texture 
+// coordinates using efficient quotient-and-remainder stepping
+static void PATCH_IMPL drastic_interpolate_uv_linear(int16_t *out, const uint8_t *spans, unsigned span_count, unsigned pixel_count) {
+	for (unsigned i=0; i<span_count; i++) {
+		const int16_t *start = (const int16_t *)(spans + 0x2c0 + i*4);
+		const int16_t *delta = (const int16_t *)(spans + 0x370 + i*4);
+		unsigned width = *(const uint16_t *)(spans + 0x630 + i*4);
+		if (!width) continue;
+		int32_t uv[2], step[2], remainder[2], error[2] = {0,0};
+		for (unsigned axis=0; axis<2; axis++) {
+			uv[axis] = start[axis];
+			step[axis] = delta[axis] / (int32_t)width;
+			remainder[axis] = delta[axis] - step[axis]*(int32_t)width;
+			if (remainder[axis]<0) {
+				step[axis]--;
+				remainder[axis] += (int32_t)width;
+			}
+		}
+		for (unsigned x=0; x<width; x++) {
+			for (unsigned axis=0; axis<2; axis++) {
+				*out++ = (int16_t)(uv[axis] >> 4);
+				uv[axis] += step[axis];
+				error[axis] += remainder[axis];
+				if (error[axis]>=(int32_t)width) {
+					error[axis] -= (int32_t)width;
+					uv[axis]++;
+				}
+			}
+		}
+	}
+	for (unsigned i=pixel_count; i<((pixel_count+7)&~7u); i++) {
+		*out++ = 0;
+		*out++ = 0;
+	}
+}
+void PATCH_HOOK drastic_interpolate_uv_hook(void);
+__asm__(
+	".pushsection .text\n"
+	".balign 4\n"
+	".global drastic_interpolate_uv_hook\n"
+	".hidden drastic_interpolate_uv_hook\n"
+	".type drastic_interpolate_uv_hook, %function\n"
+	"drastic_interpolate_uv_hook:\n"
+	"tbz w22, #5, 1f\n"
+	"ldr x1, [sp, #0x80]\n"
+	"mov w2, w24\n"
+	"b drastic_interpolate_uv_linear\n"
+	"1:\n"
+	"add x5, x1, w4, uxtw #2\n"
+	"2:\n"
+	"ld1 {v0.8h}, [x2], #16\n"
+	"ld2 {v1.4s, v2.4s}, [x1], #32\n"
+	"ld2 {v5.8h, v6.8h}, [x5], #32\n"
+	"ld2 {v3.4s, v4.4s}, [x1], #32\n"
+	"smlal v1.4s, v5.4h, v0.4h\n"
+	"smlal v2.4s, v6.4h, v0.4h\n"
+	"smlal2 v3.4s, v5.8h, v0.8h\n"
+	"smlal2 v4.4s, v6.8h, v0.8h\n"
+	"shrn v16.4h, v1.4s, #16\n"
+	"shrn v17.4h, v2.4s, #16\n"
+	"shrn2 v16.8h, v3.4s, #16\n"
+	"shrn2 v17.8h, v4.4s, #16\n"
+	"sshr v16.8h, v16.8h, #3\n"
+	"sshr v17.8h, v17.8h, #3\n"
+	"st2 {v16.8h, v17.8h}, [x0], #32\n"
+	"subs w3, w3, #8\n"
+	"b.gt 2b\n"
+	"ret\n"
+	".size drastic_interpolate_uv_hook, .-drastic_interpolate_uv_hook\n"
+	".popsection\n"
+);
 
 // --------------------------------------------
 
@@ -4617,7 +4699,7 @@ static void patch_absolute_jump(void *target, void *replacement) {
 }
 
 static void resolve_real(void) {
-	// hook glibc? functions
+	// libc
 	real__libc_start_main = dlsym(RTLD_NEXT, "__libc_start_main");
 	real__sprintf_chk = dlsym(RTLD_NEXT, "__sprintf_chk");
 	real__snprintf_chk = dlsym(RTLD_NEXT, "__snprintf_chk");
@@ -4631,7 +4713,7 @@ static void resolve_real(void) {
 	real_read = dlsym(RTLD_NEXT, "read");
 	real_gettimeofday = dlsym(RTLD_NEXT, "gettimeofday");
 	
-	// hook SDL functions
+	// SDL
 	real_SDL_Init = dlsym(RTLD_NEXT, "SDL_Init");
 	
 	real_SDL_CreateWindow = dlsym(RTLD_NEXT, "SDL_CreateWindow");
@@ -4647,6 +4729,7 @@ static void resolve_real(void) {
 	// patch drastic functions
 	void *target = (uint8_t *)app.base + 0x6c7a0;
 	patch_absolute_jump(target, drastic_spu_get_microphone_sample);
+	patch_absolute_jump((uint8_t *)app.base + 0x9a3a0, drastic_interpolate_uv_hook);
 	
 	printf("resolved real function pointers\n"); fflush(stdout);
 }
