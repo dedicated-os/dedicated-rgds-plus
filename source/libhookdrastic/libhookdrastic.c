@@ -1136,6 +1136,24 @@ static int32_t drastic_spu_get_microphone_sample(void *spu, uint64_t timestamp) 
 
 ; // fixes TextMate's syntax coloring :lolsob: after above macros
 
+static void patch_code(void *target, const void *code, size_t size) {
+    size_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t page = (uintptr_t)target & ~(page_size - 1);
+
+    mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    memcpy(target, code, size);
+    __builtin___clear_cache((char *)target, (char *)target + size);
+    mprotect((void *)page, page_size, PROT_READ | PROT_EXEC);
+}
+static void patch_absolute_jump(void *target, void *replacement) {
+    uint32_t patch[4];
+
+    patch[0] = 0x58000050;
+    patch[1] = 0xd61f0200;
+    memcpy(&patch[2], &replacement, sizeof(replacement));
+    patch_code(target, patch, sizeof(patch));
+}
+
 // drastic rounds texture interpolation too early, corrupting text, 
 // so patch constant-depth rendering to calculate exact texture 
 // coordinates using efficient quotient-and-remainder stepping
@@ -1208,6 +1226,20 @@ __asm__(
 	".size drastic_interpolate_uv_hook, .-drastic_interpolate_uv_hook\n"
 	".popsection\n"
 );
+
+static void patch_drastic(void) {
+	// patch drastic functions
+	void *target = (uint8_t *)app.base + 0x6c7a0;
+	patch_absolute_jump(target, drastic_spu_get_microphone_sample);
+	patch_absolute_jump((uint8_t *)app.base + 0x9a3a0, drastic_interpolate_uv_hook);
+	
+	// Fix NSMB red clouds by using v2 instead of v1 to preserve destination fog 
+	// on translucent pixels without disabling rectangle optimization, based on
+	// MelonDS and DSperate handling
+	uint32_t fog_combine = 0x6ea21cf3;
+	patch_code((uint8_t *)app.base + 0x9b2cc, &fog_combine, sizeof(fog_combine));
+	patch_code((uint8_t *)app.base + 0x9b374, &fog_combine, sizeof(fog_combine));
+}
 
 // --------------------------------------------
 
@@ -4682,21 +4714,6 @@ static inline uintptr_t find_exe_base(void) {
 	dl_iterate_phdr(pick_main, &base);
 	return base;
 }
-static void patch_absolute_jump(void *target, void *replacement) {
-    uint32_t patch[4];
-
-    patch[0] = 0x58000050;
-    patch[1] = 0xd61f0200;
-    memcpy(&patch[2], &replacement, sizeof(replacement));
-
-    size_t page_size = sysconf(_SC_PAGESIZE);
-    uintptr_t page = (uintptr_t)target & ~(page_size - 1);
-
-    mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
-    memcpy(target, patch, sizeof(patch));
-    __builtin___clear_cache((char *)target, (char *)target + sizeof(patch));
-    mprotect((void *)page, page_size, PROT_READ | PROT_EXEC);
-}
 
 static void resolve_real(void) {
 	// libc
@@ -4724,19 +4741,19 @@ static void resolve_real(void) {
 	real_SDL_OpenAudio = dlsym(RTLD_NEXT, "SDL_OpenAudio");
 	real_SDL_Delay = dlsym(RTLD_NEXT, "SDL_Delay");
 	
-	app.base = find_exe_base();
-	
-	// patch drastic functions
-	void *target = (uint8_t *)app.base + 0x6c7a0;
-	patch_absolute_jump(target, drastic_spu_get_microphone_sample);
-	patch_absolute_jump((uint8_t *)app.base + 0x9a3a0, drastic_interpolate_uv_hook);
-	
 	printf("resolved real function pointers\n"); fflush(stdout);
 }
 
-static pthread_once_t resolve_once = PTHREAD_ONCE_INIT;
+static void hook_init(void) {
+	app.base = find_exe_base();
+
+	resolve_real();
+	patch_drastic();
+}
+
+static pthread_once_t hook_once = PTHREAD_ONCE_INIT;
 static inline void hook(void) {
-	pthread_once(&resolve_once, resolve_real);
+	pthread_once(&hook_once, hook_init);
 }
 
 static drastic_main_t drastic_main = NULL;
