@@ -1227,18 +1227,115 @@ __asm__(
 	".popsection\n"
 );
 
+// Electroplankton candidate fix: include shallow-edge coverage in the existing
+// constant-depth scanline renderer, only when all edge attributes are constant.
+// Changing attributes need matching interpolation changes before moving coverage.
+// Bias depends on side/slope; right endpoints are exclusive. Steep edges stay intact.
+static uintptr_t PATCH_IMPL drastic_shallow_edge_targets[4];
+void PATCH_HOOK drastic_shallow_edge_hook(void);
+__asm__(
+	".pushsection .text\n"
+	".balign 4\n"
+	".global drastic_shallow_edge_hook\n"
+	".hidden drastic_shallow_edge_hook\n"
+	".type drastic_shallow_edge_hook, %function\n"
+	"drastic_shallow_edge_hook:\n"
+	// w7 is signed X increment with 18 fractional bits; w5 is starting X.
+	// x8..x12 are scratch here. x16 holds the output cursor and must survive.
+	"adrp x8, drastic_shallow_edge_targets\n"
+	"add x8, x8, :lo12:drastic_shallow_edge_targets\n"
+	"cmp w7, #0x40, lsl #12\n"
+	"b.gt 1f\n"
+	"cmn w7, #0x40, lsl #12\n"
+	"b.ge 5f\n"
+	"1:\n"
+	// x0 contains vertex-pointer pairs; w18 is this pair's first index.
+	// +8 packs W, color and UV. Depth is at +0. Only XY may differ.
+	"ldr x9, [x0, w18, uxtw #3]\n"
+	"add w10, w18, #1\n"
+	"ldr x10, [x0, w10, uxtw #3]\n"
+	"ldr x11, [x9, #8]\n"
+	"ldr x12, [x10, #8]\n"
+	"cmp x11, x12\n"
+	"b.ne 5f\n"
+	"ldr w11, [x9]\n"
+	"ldr w12, [x10]\n"
+	"cmp w11, w12\n"
+	"b.ne 5f\n"
+	// Saved return PC identifies the left/right edge callers. Other callers
+	// retain original behavior, including any separate high-resolution path.
+	"ldr x9, [sp, #8]\n"
+	"ldr x10, [x8]\n"
+	"cmp x9, x10\n"
+	"b.eq 2f\n"
+	"ldr x10, [x8, #8]\n"
+	"cmp x9, x10\n"
+	"b.ne 5f\n"
+	// Shallow right edge: positive slopes advance by one increment.
+	"tbnz w7, #31, 4f\n"
+	"add w5, w5, w7\n"
+	"b 3f\n"
+	"2:\n"
+	// Shallow left edge: negative slopes advance by one increment.
+	"tbz w7, #31, 3f\n"
+	"add w5, w5, w7\n"
+	"b 4f\n"
+	"3:\n"
+	"add w5, w5, #0x20, lsl #12\n"
+	"b 5f\n"
+	"4:\n"
+	// Negative slopes use ceil rather than floor: half a pixel minus one
+	// fixed-point unit supplies that rounding in the existing unsigned shift.
+	"mov w10, #0x20000\n"
+	"sub w10, w10, #1\n"
+	"add w5, w5, w10\n"
+	"5:\n"
+	// Replay 0x4cd50..0x4cd5c, including clipping and empty-edge handling.
+	"madd w6, w7, w4, w5\n"
+	"cmp x17, #0\n"
+	"csel w5, w6, w5, eq\n"
+	"cbz w14, 6f\n"
+	"ldr x8, [x8, #16]\n"
+	"br x8\n"
+	"6:\n"
+	"ldr x8, [x8, #24]\n"
+	"br x8\n"
+	".size drastic_shallow_edge_hook, .-drastic_shallow_edge_hook\n"
+	".popsection\n"
+);
+
+// Fix NSMB red clouds by using v2 instead of v1 to preserve destination fog 
+// on translucent pixels without disabling rectangle optimization, based on
+// MelonDS and DSperate handling
+static void drastic_fog_combine(void) {
+	uint32_t fog_combine = 0x6ea21cf3;
+	patch_code((uint8_t *)app.base + 0x9b2cc, &fog_combine, sizeof(fog_combine));
+	patch_code((uint8_t *)app.base + 0x9b374, &fog_combine, sizeof(fog_combine));
+}
+
+// Fix Electroplankton outline/fill gap by adjusting shallow polygon edges with
+// constant attributes to reduce gaps between fills and textured outlines, risky
+// and incomplete may cause regressions in other games
+static void drastic_edge_rasterization(void) {
+	drastic_shallow_edge_targets[0] = app.base + 0x4d074;
+	drastic_shallow_edge_targets[1] = app.base + 0x4d234;
+	drastic_shallow_edge_targets[2] = app.base + 0x4cd60;
+	drastic_shallow_edge_targets[3] = app.base + 0x4cec8;
+	// Use x8 for this jump: the usual x16 scratch is live inside this routine.
+	void *shallow_hook = drastic_shallow_edge_hook;
+	uint32_t shallow_jump[4] = {0x58000048, 0xd61f0100, 0, 0};
+	memcpy(&shallow_jump[2], &shallow_hook, sizeof(shallow_hook));
+	patch_code((uint8_t *)app.base + 0x4cd50, shallow_jump, sizeof(shallow_jump));
+}
+
 static void patch_drastic(void) {
 	// patch drastic functions
 	void *target = (uint8_t *)app.base + 0x6c7a0;
 	patch_absolute_jump(target, drastic_spu_get_microphone_sample);
 	patch_absolute_jump((uint8_t *)app.base + 0x9a3a0, drastic_interpolate_uv_hook);
 	
-	// Fix NSMB red clouds by using v2 instead of v1 to preserve destination fog 
-	// on translucent pixels without disabling rectangle optimization, based on
-	// MelonDS and DSperate handling
-	uint32_t fog_combine = 0x6ea21cf3;
-	patch_code((uint8_t *)app.base + 0x9b2cc, &fog_combine, sizeof(fog_combine));
-	patch_code((uint8_t *)app.base + 0x9b374, &fog_combine, sizeof(fog_combine));
+	drastic_fog_combine();
+	// drastic_edge_rasterization();
 }
 
 // --------------------------------------------
