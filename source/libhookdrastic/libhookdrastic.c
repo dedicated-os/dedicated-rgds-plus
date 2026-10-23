@@ -4555,11 +4555,6 @@ void SDL_RenderPresent(SDL_Renderer *_) {
 	
 	App_render(); // complete render takeover
 
-	if (Pad_justReleased(PAD_MENU)) {
-		App_menu();
-		return;
-	}
-
 	// no before-drastic-frame hook so call this 
 	// as late as possible so it's ready at the 
 	// beginning of the next frame
@@ -4603,6 +4598,11 @@ int SDL_PollEvent(SDL_Event* event) {
 		if (Device_handleEvent(event)) continue;
 		
 		if (Pad_justPressed(PAD_MENU)) continue;
+		
+		if (Pad_justReleased(PAD_MENU)) {
+			App_menu();
+			continue;
+		}
 		
 		// LOG_event(event);
 		switch (event->type) {
