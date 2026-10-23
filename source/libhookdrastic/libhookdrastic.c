@@ -1154,6 +1154,7 @@ static void patch_absolute_jump(void *target, void *replacement) {
     patch_code(target, patch, sizeof(patch));
 }
 
+// Fixed Etrian Odyssey menu text rendering clipping
 // drastic rounds texture interpolation too early, corrupting text, 
 // so patch constant-depth rendering to calculate exact texture 
 // coordinates using efficient quotient-and-remainder stepping
@@ -1335,7 +1336,7 @@ static void patch_drastic(void) {
 	patch_absolute_jump((uint8_t *)app.base + 0x9a3a0, drastic_interpolate_uv_hook);
 	
 	drastic_fog_combine();
-	// drastic_edge_rasterization();
+	drastic_edge_rasterization();
 }
 
 // --------------------------------------------
