@@ -1,16 +1,10 @@
 CHANGE LOG
 
-- fixed fast-forward/mute desync
-- fixed crash when loading a save state
-- drastic: fixed garbled text rendering in Etrian Odyssey
-- drastic: fixed red clouds in New Super Mario Bros.
-- drastic: fixed gaps between geometry and outlines in Electroplankton
+- fixed archive menu viewport paging
 
 ----------------------------------------
 
 [/] increase type/icon size 1.5x
-[ ] archive left right don't jump correct number of rows
-	it's moving the edge of the view, not the top
 
 ----------------------------------------
 

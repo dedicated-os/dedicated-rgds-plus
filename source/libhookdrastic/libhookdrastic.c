@@ -3908,12 +3908,14 @@ static void App_archive(int current) {
 			dirty = 1;
 		}
 		
+		int previous = current;
 		if (Pad_justPressed(PAD_RIGHT)) {
 			if (current==app.count-1) current = 0;
 			else {
 				current += rows;
 				if (current>=app.count) current = app.count-1;
 			}
+			top += current - previous;
 			dirty = 1;
 		}
 		else if (Pad_justPressed(PAD_LEFT)) {
@@ -3922,6 +3924,7 @@ static void App_archive(int current) {
 				current -= rows;
 				if (current<0) current = 0;
 			}
+			top += current - previous;
 			dirty = 1;
 		}
 		
