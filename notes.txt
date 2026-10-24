@@ -4,7 +4,7 @@ CHANGE LOG
 
 ----------------------------------------
 
-[/] increase type/icon size 1.5x
+[ ] 
 
 ----------------------------------------
 
@@ -35,11 +35,9 @@ then in Cutter find sym.quit, show Xrefs, and trace its args up through the call
 
 ----------------------------------------
 
-NOTE: Using two separate cards, one for the system and another for games and userdata, is the preferred setup. Using a single card is possible but not recommended.
-
 # Updating
-1. Download the `dedicated-rgds-plus` zip below.
-2. Unzip and copy `system.zip` to the root of your TF2/EXT SD card.
+1. Download the `dedicated-rgds-plus` zip below and unzip.
+2. Copy `system.zip` to the root of your TF2/EXT SD card.
 3. Eject and insert the card back into the TF2/EXT slot.
 
 # Installing
@@ -51,3 +49,11 @@ NOTE: Using two separate cards, one for the system and another for games and use
 6. Add your games and bios to the SD card (the games you won't be playing immediately can go in `/games/archive` to hide them for now). Insert into the TF2/EXT slot.
 
 [main]:https://github.com/dedicated-os/main-rgds-plus/releases/latest
+
+> [!NOTE]
+> Using two separate cards, one for the system and another for games and userdata, is the preferred setup. Using a single card is possible but not recommended.
+
+----------------------------------------
+
+> [!CAUTION]
+> This release is out of date. [Download the latest instead.](https://github.com/dedicated-os/dedicated-rgds-plus/releases/latest)
